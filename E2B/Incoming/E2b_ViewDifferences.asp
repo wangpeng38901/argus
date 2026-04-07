@@ -328,6 +328,73 @@
 				return;
 			}
 
+			function fn_GetRowDTDElement(lIndex)
+			{
+				var oDTDElement = fn_getElementByName("dtd_element_" + lIndex);
+				if(!oDTDElement)
+					return "";
+
+				var sDTDElement = leftTrim(oDTDElement.outerText);
+				var lPos = sDTDElement.indexOf("]");
+				if(lPos >= 0)
+					sDTDElement = sDTDElement.substring(lPos + 1);
+				if (sDTDElement)
+					sDTDElement = trim(sDTDElement);
+
+				return sDTDElement.toUpperCase();
+			}
+
+			function fn_IsGroupMatch(lIndex, sGroup)
+			{
+				if (sGroup == "" || sGroup == "ALL")
+					return true;
+
+				var sPath = "";
+				if (aElementPaths[lIndex])
+					sPath = ("" + aElementPaths[lIndex]).toUpperCase();
+
+				var sDTDElement = fn_GetRowDTDElement(lIndex);
+				if (sGroup == "TEST")
+					return (sPath.indexOf("/TEST/") >= 0) || (sDTDElement == "TEST") || (sDTDElement.indexOf("TEST") == 0);
+
+				if (sGroup == "EVENT")
+					return (sPath.indexOf("/REACTION/") >= 0) || (sPath.indexOf("/EVENT/") >= 0) || (sDTDElement == "PRIMARYSOURCEREACTION") || (sDTDElement == "REACTIONMEDDRAPT") || (sDTDElement == "REACTIONMEDDRALLT") || (sDTDElement == "REACTION") || (sDTDElement.indexOf("REACTION") == 0) || (sDTDElement.indexOf("EVENT") == 0);
+
+				if (sGroup == "DRUG")
+					return (sPath.indexOf("/DRUG/") >= 0) || (sPath.indexOf("/MEDICINALPRODUCT/") >= 0) || (sDTDElement == "DRUG") || (sDTDElement == "MEDICINALPRODUCT") || (sDTDElement.indexOf("DRUG") == 0) || (sDTDElement.indexOf("MEDICINALPRODUCT") == 0);
+
+				return false;
+			}
+
+			function fn_SelectImportRows(bSelect, sGroup)
+			{
+				showLoading();
+
+				if (sGroup == null || sGroup == undefined)
+					sGroup = "ALL";
+				else
+					sGroup = ("" + sGroup).toUpperCase();
+
+				for (var i = 0; i < lDiffCount; i++)
+				{
+					var oControl = fn_ImportCheckBox(i);
+					if (oControl)
+					{
+						if (oControl.disabled == false && fn_IsGroupMatch(i, sGroup))
+							oControl.checked = bSelect;
+					}
+				}
+
+				hideLoading();
+			}
+
+			function fn_BatchSelectToggle(sControlName, sGroup)
+			{
+				var oControl = fn_getElementByName(sControlName);
+				if (oControl)
+					fn_SelectImportRows(oControl.checked, sGroup);
+			}
+
 			// Save the User Options
 			async function fn_SaveUserOptions()
 			{
@@ -834,6 +901,30 @@
 														  AddTopOption(GetTranslationData("CURRENT_E2B_VS_CURRENT_CASE_IN_DB") & ":2;" & GetTranslationData("CURRENT_E2B_VS_LAST_IMPORTED_E2B") & ":4;" & _
 																	   GetTranslationData("CURRENT_CASE_IN_DB_VS_LAST_IMPORTED_E2B") & ":8").Style("width:300px"). _
 																	   OnChange("fn_DiffOptionChanged(diff_option.value);").Render()%>
+												</td>
+											</tr>
+											<tr style="height: 25px">
+												<td colspan="2" style="padding: 2px 5px 2px 5px;">
+													<table style="width:100%" cellpadding="0" cellspacing="0">
+														<col style="width:25%" />
+														<col style="width:25%" />
+														<col style="width:25%" />
+														<col style="width:25%" />
+														<tr>
+															<td style="white-space:nowrap;">
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_select_all", false, false, oTabIndex.NextIndex(), GetTranslationData("SELECT_ALL")).OnClick("fn_BatchSelectToggle('chk_select_all', 'ALL');").Render()%>
+															</td>
+															<td style="white-space:nowrap;">
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_test_select_all", false, false, oTabIndex.NextIndex(), "TEST " & GetTranslationData("SELECT_ALL")).OnClick("fn_BatchSelectToggle('chk_test_select_all', 'TEST');").Render()%>
+															</td>
+															<td style="white-space:nowrap;">
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_event_select_all", false, false, oTabIndex.NextIndex(), "Event " & GetTranslationData("SELECT_ALL")).OnClick("fn_BatchSelectToggle('chk_event_select_all', 'EVENT');").Render()%>
+															</td>
+															<td style="white-space:nowrap;">
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_drug_select_all", false, false, oTabIndex.NextIndex(), "Drug " & GetTranslationData("SELECT_ALL")).OnClick("fn_BatchSelectToggle('chk_drug_select_all', 'DRUG');").Render()%>
+															</td>
+														</tr>
+													</table>
 												</td>
 											</tr>
 										</table>
