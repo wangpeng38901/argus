@@ -414,11 +414,50 @@ def cioms_to_context(cioms: CiomsData) -> Dict[str, Any]:
     all_drugs = sorted(cioms.suspected_drugs, key=lambda x: x.seq) + sorted(
         cioms.concomitant_drugs, key=lambda x: x.seq
     )
-    return {
-        "feedback_code": "",
+    cioms_dict = {
+        "report_code": cioms.report_code,
         "report_type": cioms.report_type or "首次报告",
-        "report_severity": "严重" if cioms.severe_criteria else "一般",
+        "report_source": cioms.report_source,
+        "organization_type": cioms.organization_type,
+        "gender": cioms.gender,
+        "age": cioms.age,
+        "age_unit": cioms.age_unit,
+        "ethnicity": cioms.ethnicity,
+        "weight": cioms.weight,
+        "event_date": cioms.event_date,
+        "reaction_name": cioms.reaction_name,
+        "reaction_description": cioms.reaction_description,
+        "outcome": cioms.outcome,
+        "severe_criteria": cioms.severe_criteria,
+        "dechallenge": cioms.dechallenge,
+        "rechallenge": cioms.rechallenge,
+        "reporter_assessment": cioms.reporter_assessment,
+        "company_assessment": cioms.company_assessment,
+        "report_date": cioms.report_date,
+        "info_source": cioms.info_source,
+        "notes": cioms.notes,
+        "primary_disease": cioms.primary_disease,
+        "important_info": cioms.important_info,
+        "suspected_drugs": [d.__dict__ for d in cioms.suspected_drugs],
+        "concomitant_drugs": [d.__dict__ for d in cioms.concomitant_drugs],
+    }
+    computed = {
+        "report_level": "严重" if cioms.severe_criteria else "一般",
         "severe_criteria_joined": "；".join(cioms.severe_criteria),
+        "drug_rows": [d.__dict__ for d in all_drugs],
+    }
+
+    # 兼容两类配置：
+    # 1) 新配置：source 使用 report_type / all_drugs 等扁平 key
+    # 2) 旧配置：source 使用 cioms.xxx / computed.xxx / template_feedback_code
+    return {
+        "cioms": cioms_dict,
+        "computed": computed,
+        "template_feedback_code": "",
+        "feedback_code": "",
+        "report_type": cioms_dict["report_type"],
+        "report_severity": computed["report_level"],
+        "severe_criteria_joined": computed["severe_criteria_joined"],
         "organization_type": cioms.organization_type,
         "gender": cioms.gender,
         "age": cioms.age,
@@ -439,18 +478,41 @@ def cioms_to_context(cioms: CiomsData) -> Dict[str, Any]:
         "notes": cioms.notes,
         "primary_disease": cioms.primary_disease,
         "reaction_name": cioms.reaction_name,
-        "reaction_level": "严重" if cioms.severe_criteria else "一般",
+        "reaction_level": computed["report_level"],
         "important_info": cioms.important_info,
-        "all_drugs": [d.__dict__ for d in all_drugs],
+        "all_drugs": computed["drug_rows"],
     }
 
 
+def get_by_path(data: Dict[str, Any], path: str) -> Any:
+    cur: Any = data
+    for part in path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return None
+    return cur
+
+
 def resolve_value(source: str, row_ctx: Dict[str, Any], global_ctx: Dict[str, Any], default: Any = "") -> Any:
+    if source == "":
+        return default
+    if source.startswith("row."):
+        v = get_by_path(row_ctx, source[4:])
+        return default if v is None else v
     if source.startswith("global."):
-        return global_ctx.get(source[7:], default)
+        v = get_by_path(global_ctx, source[7:])
+        return default if v is None else v
     if source in row_ctx:
-        return row_ctx.get(source, default)
-    return global_ctx.get(source, default)
+        v = row_ctx.get(source)
+        return default if v is None else v
+    v = get_by_path(global_ctx, source)
+    if v is not None:
+        return v
+    if source in global_ctx:
+        v = global_ctx.get(source)
+        return default if v is None else v
+    return default
 
 
 def header_to_col_map(sheet, header_row: int) -> Dict[str, int]:
@@ -473,7 +535,10 @@ def apply_single_sheet_mapping(sheet, sheet_cfg: Dict[str, Any], global_ctx: Dic
     for item in sheet_cfg.get("mappings", []):
         source = item.get("source", "")
         default = item.get("default", "")
-        value = resolve_value(source, {}, global_ctx, default=default)
+        if source == "literal":
+            value = item.get("value", default)
+        else:
+            value = resolve_value(source, {}, global_ctx, default=default)
         col = item.get("column")
         if col is None and item.get("header"):
             col = header_map.get(str(item["header"]))
@@ -488,7 +553,7 @@ def apply_list_sheet_mapping(sheet, sheet_cfg: Dict[str, Any], global_ctx: Dict[
         clear_sheet_from_row(sheet, clear_from)
 
     source_key = sheet_cfg.get("source", "")
-    rows = global_ctx.get(source_key, [])
+    rows = resolve_value(source_key, {}, global_ctx, default=[])
     if not isinstance(rows, list):
         return
 
@@ -503,7 +568,10 @@ def apply_list_sheet_mapping(sheet, sheet_cfg: Dict[str, Any], global_ctx: Dict[
         for item in sheet_cfg.get("mappings", []):
             source = item.get("source", "")
             default = item.get("default", "")
-            value = resolve_value(source, row_data, global_ctx, default=default)
+            if source == "literal":
+                value = item.get("value", default)
+            else:
+                value = resolve_value(source, row_data, global_ctx, default=default)
             col = item.get("column")
             if col is None and item.get("header"):
                 col = header_map.get(str(item["header"]))
@@ -513,7 +581,7 @@ def apply_list_sheet_mapping(sheet, sheet_cfg: Dict[str, Any], global_ctx: Dict[
 
 
 def fill_feedback_code_from_template(wb, global_ctx: Dict[str, Any]) -> None:
-    if global_ctx.get("feedback_code"):
+    if global_ctx.get("feedback_code") or global_ctx.get("template_feedback_code"):
         return
     if "药品不良反应报告表" not in wb.sheetnames:
         return
@@ -525,6 +593,78 @@ def fill_feedback_code_from_template(wb, global_ctx: Dict[str, Any]) -> None:
     value = sheet.cell(2, col).value
     if value not in (None, ""):
         global_ctx["feedback_code"] = str(value)
+        global_ctx["template_feedback_code"] = str(value)
+
+
+def apply_legacy_rows_mapping(sheet, sheet_cfg: Dict[str, Any], global_ctx: Dict[str, Any]) -> None:
+    clear_from = int(sheet_cfg.get("clear_from_row", 0) or 0)
+    if clear_from > 0:
+        clear_sheet_from_row(sheet, clear_from)
+
+    rows_cfg = sheet_cfg.get("rows", [])
+    header_map = header_to_col_map(sheet, 1)
+    for row_cfg in rows_cfg:
+        target_row = int(row_cfg.get("row", 2))
+        by_header = row_cfg.get("by_header", {})
+        by_column = row_cfg.get("by_column", {})
+
+        for header, rule in by_header.items():
+            if not isinstance(rule, dict):
+                continue
+            source = str(rule.get("source", ""))
+            default = rule.get("default", "")
+            value = rule.get("value", default) if source == "literal" else resolve_value(source, {}, global_ctx, default)
+            col = header_map.get(str(header))
+            if col:
+                sheet.cell(target_row, col, value=value)
+
+        for col_text, rule in by_column.items():
+            if not isinstance(rule, dict):
+                continue
+            source = str(rule.get("source", ""))
+            default = rule.get("default", "")
+            value = rule.get("value", default) if source == "literal" else resolve_value(source, {}, global_ctx, default)
+            sheet.cell(target_row, int(col_text), value=value)
+
+
+def apply_legacy_table_mapping(sheet, sheet_cfg: Dict[str, Any], global_ctx: Dict[str, Any]) -> None:
+    clear_from = int(sheet_cfg.get("clear_from_row", 0) or 0)
+    if clear_from > 0:
+        clear_sheet_from_row(sheet, clear_from)
+
+    table_cfg = sheet_cfg.get("table", {})
+    if not isinstance(table_cfg, dict):
+        return
+    rows = resolve_value(str(table_cfg.get("source", "")), {}, global_ctx, default=[])
+    if not isinstance(rows, list):
+        return
+
+    start_row = int(table_cfg.get("start_row", 2))
+    header_map = header_to_col_map(sheet, 1)
+    by_header = table_cfg.get("by_header", {})
+    by_column = table_cfg.get("by_column", {})
+
+    for i, row_data in enumerate(rows):
+        if not isinstance(row_data, dict):
+            continue
+        row_idx = start_row + i
+        for header, rule in by_header.items():
+            if not isinstance(rule, dict):
+                continue
+            source = str(rule.get("source", ""))
+            default = rule.get("default", "")
+            value = rule.get("value", default) if source == "literal" else resolve_value(source, row_data, global_ctx, default)
+            col = header_map.get(str(header))
+            if col:
+                sheet.cell(row_idx, col, value=value)
+
+        for col_text, rule in by_column.items():
+            if not isinstance(rule, dict):
+                continue
+            source = str(rule.get("source", ""))
+            default = rule.get("default", "")
+            value = rule.get("value", default) if source == "literal" else resolve_value(source, row_data, global_ctx, default)
+            sheet.cell(row_idx, int(col_text), value=value)
 
 
 def write_excel(cioms: CiomsData, template_bytes: bytes, output_path: Path, mapping_cfg: Dict[str, Any]) -> None:
@@ -538,6 +678,13 @@ def write_excel(cioms: CiomsData, template_bytes: bytes, output_path: Path, mapp
         if not sheet_name or sheet_name not in wb.sheetnames:
             continue
         sheet = wb[sheet_name]
+        # 兼容旧配置结构（rows/table）与新配置结构（mode/mappings）
+        if "rows" in sheet_cfg:
+            apply_legacy_rows_mapping(sheet, sheet_cfg, context)
+            continue
+        if "table" in sheet_cfg:
+            apply_legacy_table_mapping(sheet, sheet_cfg, context)
+            continue
         mode = sheet_cfg.get("mode", "single")
         if mode == "list":
             apply_list_sheet_mapping(sheet, sheet_cfg, context)
