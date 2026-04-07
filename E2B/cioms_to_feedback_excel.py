@@ -15,13 +15,19 @@ import argparse
 import io
 import json
 import re
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
 from openpyxl import load_workbook
 from pypdf import PdfReader
+
+try:
+    import requests  # type: ignore
+except Exception:
+    requests = None
 
 
 DEFAULT_PDF_URL = "https://raw.githubusercontent.com/wangpeng38901/argus/main/CIOMS/CIOMS文件.pdf"
@@ -79,9 +85,16 @@ class CiomsData:
 
 
 def download_binary(url: str) -> bytes:
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    return response.content
+    if requests is not None:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        return response.content
+
+    parts = urllib.parse.urlsplit(url)
+    safe_path = urllib.parse.quote(parts.path, safe="/")
+    encoded_url = urllib.parse.urlunsplit((parts.scheme, parts.netloc, safe_path, parts.query, parts.fragment))
+    with urllib.request.urlopen(encoded_url, timeout=30) as resp:
+        return resp.read()
 
 
 def normalize_spaces(text: str) -> str:
