@@ -1,0 +1,105 @@
+{
+  "sheets": [
+    {
+      "name": "药品不良反应报告表",
+      "clear_from_row": 2,
+      "rows": [
+        {
+          "row": 2,
+          "by_header": {
+            "反馈码": {"source": "template_feedback_code", "default": ""},
+            "首次/跟踪报告": {"source": "cioms.report_type", "default": "首次报告"},
+            "报告类型": {"source": "computed.report_level"},
+            "严重不良反应": {"source": "computed.severe_criteria_joined"},
+            "报告单位类别": {"source": "cioms.organization_type"},
+            "性别": {"source": "cioms.gender"},
+            "年龄": {"source": "cioms.age"},
+            "年龄单位": {"source": "cioms.age_unit"},
+            "民族": {"source": "cioms.ethnicity"},
+            "体重": {"source": "cioms.weight"},
+            "既往药品不良反应": {"source": "literal", "value": "不详"},
+            "家族药品不良反应": {"source": "literal", "value": "不详"},
+            "不良反应发生时间": {"source": "cioms.event_date"},
+            "不良反应过程描述": {"source": "cioms.reaction_description"},
+            "不良反应结果": {"source": "cioms.outcome"},
+            "停药减药后反应是否减轻或消失": {"source": "cioms.dechallenge"},
+            "再次使用可疑药是否出现同样反应": {"source": "cioms.rechallenge"},
+            "报告人评价": {"source": "cioms.reporter_assessment"},
+            "报告单位评价": {"source": "cioms.company_assessment"},
+            "报告日期": {"source": "cioms.report_date"},
+            "信息来源": {"source": "cioms.info_source"},
+            "备注": {"source": "cioms.notes"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "原患疾病",
+      "clear_from_row": 2,
+      "rows": [
+        {
+          "row": 2,
+          "by_column": {
+            "1": {"source": "cioms.primary_disease"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "家族药品不良反应",
+      "clear_from_row": 2
+    },
+    {
+      "name": "既往药品不良反应",
+      "clear_from_row": 2
+    },
+    {
+      "name": "药品不良反应报告表-不良反应名称",
+      "clear_from_row": 2,
+      "rows": [
+        {
+          "row": 2,
+          "by_column": {
+            "1": {"source": "cioms.reaction_name"},
+            "2": {"source": "computed.report_level"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "相关重要信息",
+      "clear_from_row": 2,
+      "rows": [
+        {
+          "row": 2,
+          "by_column": {
+            "1": {"source": "cioms.important_info"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "不良反应-怀疑用药-合并用药",
+      "clear_from_row": 2,
+      "table": {
+        "source": "computed.drug_rows",
+        "start_row": 2,
+        "by_column": {
+          "1": {"source": "row.kind"},
+          "2": {"source": "row.seq"},
+          "4": {"source": "row.generic_name"},
+          "5": {"source": "row.trade_name"},
+          "6": {"source": "row.dosage_form"},
+          "9": {"source": "row.dose"},
+          "10": {"source": "row.dose_unit"},
+          "11": {"source": "row.frequency"},
+          "12": {"source": "row.days"},
+          "13": {"source": "row.route"},
+          "14": {"source": "row.start_date"},
+          "15": {"source": "row.end_date"},
+          "16": {"source": "row.indication"}
+        }
+      }
+    }
+  ]
+}

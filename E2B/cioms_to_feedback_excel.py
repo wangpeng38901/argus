@@ -6,17 +6,18 @@
 1. 从 GitHub URL 下载 CIOMS PDF 和 Excel 模板；
 2. 判断 PDF 是否为电子档（可提取文本），若疑似扫描件则报错；
 3. 解析 CIOMS 常见字段；
-4. 将解析结果写入 Excel 模板各工作表并保存输出文件。
+4. 通过 JSON/YAML 字段映射配置，将结果写入 Excel 模板并保存输出文件。
 """
 
 from __future__ import annotations
 
 import argparse
 import io
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from openpyxl import load_workbook
@@ -28,6 +29,7 @@ DEFAULT_TEMPLATE_URL = (
     "https://raw.githubusercontent.com/wangpeng38901/argus/main/CIOMS/"
     "数据反馈结果-14910028650182082562330.xlsx"
 )
+DEFAULT_MAPPING_FILE_NAME = "cioms_field_mapping.json"
 
 
 @dataclass
@@ -365,94 +367,154 @@ def clear_sheet_from_row(sheet, row_start: int = 2) -> None:
         sheet.delete_rows(row_start, sheet.max_row - row_start + 1)
 
 
-def write_excel(cioms: CiomsData, template_bytes: bytes, output_path: Path) -> None:
-    wb = load_workbook(io.BytesIO(template_bytes))
+def load_mapping_config(config_path: Path) -> Dict[str, Any]:
+    suffix = config_path.suffix.lower()
+    raw = config_path.read_text(encoding="utf-8")
+    if suffix == ".json":
+        return json.loads(raw)
+    if suffix in {".yaml", ".yml"}:
+        try:
+            import yaml  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError("读取 YAML 映射配置需要安装 pyyaml：pip3 install pyyaml") from exc
+        cfg = yaml.safe_load(raw)
+        return cfg if isinstance(cfg, dict) else {}
+    raise RuntimeError(f"不支持的映射配置格式：{config_path.suffix}（仅支持 .json/.yaml/.yml）")
 
-    # 主表
-    main = wb["药品不良反应报告表"]
-    headers = {main.cell(1, col).value: col for col in range(1, main.max_column + 1)}
-    main_values = {
-        "首次/跟踪报告": cioms.report_type or "首次报告",
-        "报告类型": "严重" if cioms.severe_criteria else "一般",
-        "严重不良反应": "；".join(cioms.severe_criteria),
-        "报告单位类别": cioms.organization_type,
-        "性别": cioms.gender,
-        "年龄": cioms.age,
-        "年龄单位": cioms.age_unit,
-        "民族": cioms.ethnicity,
-        "体重": cioms.weight,
-        "既往药品不良反应": "不详",
-        "家族药品不良反应": "不详",
-        "不良反应发生时间": cioms.event_date,
-        "不良反应过程描述": cioms.reaction_description,
-        "不良反应结果": cioms.outcome,
-        "停药减药后反应是否减轻或消失": cioms.dechallenge,
-        "再次使用可疑药是否出现同样反应": cioms.rechallenge,
-        "报告人评价": cioms.reporter_assessment,
-        "报告单位评价": cioms.company_assessment,
-        "报告日期": cioms.report_date,
-        "信息来源": cioms.info_source,
-        "备注": cioms.notes,
-    }
 
-    # 保留模板反馈码（如果模板已有），否则从模板文件名提取
-    if "反馈码" in headers:
-        current_feedback_code = main.cell(2, headers["反馈码"]).value
-        if current_feedback_code:
-            main_values["反馈码"] = str(current_feedback_code)
-
-    clear_sheet_from_row(main, row_start=2)
-    for title, value in main_values.items():
-        col = headers.get(title)
-        if col:
-            main.cell(2, col, value=value)
-
-    # 原患疾病
-    disease_sheet = wb["原患疾病"]
-    clear_sheet_from_row(disease_sheet, row_start=2)
-    if cioms.primary_disease:
-        disease_sheet.cell(2, 1, cioms.primary_disease)
-
-    # 家族药品不良反应 / 既往药品不良反应（暂无可稳定抽取内容，保留空）
-    clear_sheet_from_row(wb["家族药品不良反应"], row_start=2)
-    clear_sheet_from_row(wb["既往药品不良反应"], row_start=2)
-
-    # 不良反应名称
-    reaction_sheet = wb["药品不良反应报告表-不良反应名称"]
-    clear_sheet_from_row(reaction_sheet, row_start=2)
-    reaction_sheet.cell(2, 1, cioms.reaction_name)
-    reaction_sheet.cell(2, 2, "严重" if cioms.severe_criteria else "一般")
-
-    # 重要信息
-    info_sheet = wb["相关重要信息"]
-    clear_sheet_from_row(info_sheet, row_start=2)
-    if cioms.important_info:
-        info_sheet.cell(2, 1, cioms.important_info)
-
-    # 怀疑/合并用药
-    drug_sheet = wb["不良反应-怀疑用药-合并用药"]
-    clear_sheet_from_row(drug_sheet, row_start=2)
-    row = 2
-    merged_drugs = sorted(cioms.suspected_drugs, key=lambda x: x.seq) + sorted(
+def cioms_to_context(cioms: CiomsData) -> Dict[str, Any]:
+    all_drugs = sorted(cioms.suspected_drugs, key=lambda x: x.seq) + sorted(
         cioms.concomitant_drugs, key=lambda x: x.seq
     )
-    for d in merged_drugs:
-        # 对应模板列：
-        # 1怀疑/合并,2序号,4通用名称,5商品名称,6剂型,9用量,10用量单位,11次数,12日数,13途径,14开始,15结束,16原因
-        drug_sheet.cell(row, 1, d.kind)
-        drug_sheet.cell(row, 2, str(d.seq))
-        drug_sheet.cell(row, 4, d.generic_name)
-        drug_sheet.cell(row, 5, d.trade_name)
-        drug_sheet.cell(row, 6, d.dosage_form)
-        drug_sheet.cell(row, 9, d.dose)
-        drug_sheet.cell(row, 10, d.dose_unit)
-        drug_sheet.cell(row, 11, d.frequency)
-        drug_sheet.cell(row, 12, d.days)
-        drug_sheet.cell(row, 13, d.route)
-        drug_sheet.cell(row, 14, d.start_date)
-        drug_sheet.cell(row, 15, d.end_date)
-        drug_sheet.cell(row, 16, d.indication)
-        row += 1
+    return {
+        "feedback_code": "",
+        "report_type": cioms.report_type or "首次报告",
+        "report_severity": "严重" if cioms.severe_criteria else "一般",
+        "severe_criteria_joined": "；".join(cioms.severe_criteria),
+        "organization_type": cioms.organization_type,
+        "gender": cioms.gender,
+        "age": cioms.age,
+        "age_unit": cioms.age_unit,
+        "ethnicity": cioms.ethnicity,
+        "weight": cioms.weight,
+        "history_adr": "不详",
+        "family_adr": "不详",
+        "event_date": cioms.event_date,
+        "reaction_description": cioms.reaction_description,
+        "outcome": cioms.outcome,
+        "dechallenge": cioms.dechallenge,
+        "rechallenge": cioms.rechallenge,
+        "reporter_assessment": cioms.reporter_assessment,
+        "company_assessment": cioms.company_assessment,
+        "report_date": cioms.report_date,
+        "info_source": cioms.info_source,
+        "notes": cioms.notes,
+        "primary_disease": cioms.primary_disease,
+        "reaction_name": cioms.reaction_name,
+        "reaction_level": "严重" if cioms.severe_criteria else "一般",
+        "important_info": cioms.important_info,
+        "all_drugs": [d.__dict__ for d in all_drugs],
+    }
+
+
+def resolve_value(source: str, row_ctx: Dict[str, Any], global_ctx: Dict[str, Any], default: Any = "") -> Any:
+    if source.startswith("global."):
+        return global_ctx.get(source[7:], default)
+    if source in row_ctx:
+        return row_ctx.get(source, default)
+    return global_ctx.get(source, default)
+
+
+def header_to_col_map(sheet, header_row: int) -> Dict[str, int]:
+    return {
+        str(sheet.cell(header_row, col).value).strip(): col
+        for col in range(1, sheet.max_column + 1)
+        if sheet.cell(header_row, col).value is not None and str(sheet.cell(header_row, col).value).strip() != ""
+    }
+
+
+def apply_single_sheet_mapping(sheet, sheet_cfg: Dict[str, Any], global_ctx: Dict[str, Any]) -> None:
+    clear_from = int(sheet_cfg.get("clear_from_row", 0) or 0)
+    if clear_from > 0:
+        clear_sheet_from_row(sheet, clear_from)
+
+    target_row = int(sheet_cfg.get("target_row", 2))
+    header_row = int(sheet_cfg.get("header_row", 1))
+    header_map = header_to_col_map(sheet, header_row)
+
+    for item in sheet_cfg.get("mappings", []):
+        source = item.get("source", "")
+        default = item.get("default", "")
+        value = resolve_value(source, {}, global_ctx, default=default)
+        col = item.get("column")
+        if col is None and item.get("header"):
+            col = header_map.get(str(item["header"]))
+        if col is None:
+            continue
+        sheet.cell(target_row, int(col), value=value)
+
+
+def apply_list_sheet_mapping(sheet, sheet_cfg: Dict[str, Any], global_ctx: Dict[str, Any]) -> None:
+    clear_from = int(sheet_cfg.get("clear_from_row", 0) or 0)
+    if clear_from > 0:
+        clear_sheet_from_row(sheet, clear_from)
+
+    source_key = sheet_cfg.get("source", "")
+    rows = global_ctx.get(source_key, [])
+    if not isinstance(rows, list):
+        return
+
+    start_row = int(sheet_cfg.get("start_row", 2))
+    header_row = int(sheet_cfg.get("header_row", 1))
+    header_map = header_to_col_map(sheet, header_row)
+
+    for i, row_data in enumerate(rows):
+        if not isinstance(row_data, dict):
+            continue
+        row_idx = start_row + i
+        for item in sheet_cfg.get("mappings", []):
+            source = item.get("source", "")
+            default = item.get("default", "")
+            value = resolve_value(source, row_data, global_ctx, default=default)
+            col = item.get("column")
+            if col is None and item.get("header"):
+                col = header_map.get(str(item["header"]))
+            if col is None:
+                continue
+            sheet.cell(row_idx, int(col), value=value)
+
+
+def fill_feedback_code_from_template(wb, global_ctx: Dict[str, Any]) -> None:
+    if global_ctx.get("feedback_code"):
+        return
+    if "药品不良反应报告表" not in wb.sheetnames:
+        return
+    sheet = wb["药品不良反应报告表"]
+    headers = header_to_col_map(sheet, 1)
+    col = headers.get("反馈码")
+    if not col:
+        return
+    value = sheet.cell(2, col).value
+    if value not in (None, ""):
+        global_ctx["feedback_code"] = str(value)
+
+
+def write_excel(cioms: CiomsData, template_bytes: bytes, output_path: Path, mapping_cfg: Dict[str, Any]) -> None:
+    wb = load_workbook(io.BytesIO(template_bytes))
+    context = cioms_to_context(cioms)
+    fill_feedback_code_from_template(wb, context)
+
+    sheets_cfg = mapping_cfg.get("sheets", [])
+    for sheet_cfg in sheets_cfg:
+        sheet_name = sheet_cfg.get("name")
+        if not sheet_name or sheet_name not in wb.sheetnames:
+            continue
+        sheet = wb[sheet_name]
+        mode = sheet_cfg.get("mode", "single")
+        if mode == "list":
+            apply_list_sheet_mapping(sheet, sheet_cfg, context)
+        else:
+            apply_single_sheet_mapping(sheet, sheet_cfg, context)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
@@ -462,6 +524,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="CIOMS PDF -> 数据反馈Excel 映射工具")
     parser.add_argument("--pdf-url", default=DEFAULT_PDF_URL, help="CIOMS PDF 下载地址")
     parser.add_argument("--template-url", default=DEFAULT_TEMPLATE_URL, help="Excel 模板下载地址")
+    parser.add_argument(
+        "--mapping-config",
+        default=str(Path(__file__).resolve().with_name(DEFAULT_MAPPING_FILE_NAME)),
+        help="字段映射配置文件路径（支持 .json/.yaml/.yml）",
+    )
     parser.add_argument(
         "--output",
         default="output_数据反馈结果-14910028650182082562330.xlsx",
@@ -478,11 +545,13 @@ def main() -> None:
     cioms = parse_cioms(full_text)
 
     template_bytes = download_binary(args.template_url)
+    mapping_cfg = load_mapping_config(Path(args.mapping_config).resolve())
     output = Path(args.output).resolve()
-    write_excel(cioms, template_bytes, output)
+    write_excel(cioms, template_bytes, output, mapping_cfg)
 
     print("处理完成：")
     print(f"- 电子档校验：通过（共 {len(page_texts)} 页）")
+    print(f"- 映射配置：{Path(args.mapping_config).resolve()}")
     print(f"- 输出文件：{output}")
 
 

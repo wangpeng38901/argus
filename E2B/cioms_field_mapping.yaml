@@ -1,0 +1,89 @@
+defaults:
+  static:
+    既往药品不良反应: "不详"
+    家族药品不良反应: "不详"
+  derived:
+    报告类型:
+      true: "严重"
+      false: "一般"
+      condition: "has_severe_criteria"
+    严重不良反应:
+      join_from: "severe_criteria"
+      sep: "；"
+    严重程度:
+      true: "严重"
+      false: "一般"
+      condition: "has_severe_criteria"
+
+sheets:
+  - name: "药品不良反应报告表"
+    type: "single_row"
+    start_row: 2
+    preserve_fields:
+      - "反馈码"
+    field_map:
+      "首次/跟踪报告": "report_type"
+      "报告单位类别": "organization_type"
+      "性别": "gender"
+      "年龄": "age"
+      "年龄单位": "age_unit"
+      "民族": "ethnicity"
+      "体重": "weight"
+      "不良反应发生时间": "event_date"
+      "不良反应过程描述": "reaction_description"
+      "不良反应结果": "outcome"
+      "停药减药后反应是否减轻或消失": "dechallenge"
+      "再次使用可疑药是否出现同样反应": "rechallenge"
+      "报告人评价": "reporter_assessment"
+      "报告单位评价": "company_assessment"
+      "报告日期": "report_date"
+      "信息来源": "info_source"
+      "备注": "notes"
+
+  - name: "原患疾病"
+    type: "single_row"
+    start_row: 2
+    field_map:
+      "原患疾病名称": "primary_disease"
+
+  - name: "家族药品不良反应"
+    type: "clear_only"
+    start_row: 2
+
+  - name: "既往药品不良反应"
+    type: "clear_only"
+    start_row: 2
+
+  - name: "药品不良反应报告表-不良反应名称"
+    type: "single_row"
+    start_row: 2
+    field_map:
+      "不良反应名称": "reaction_name"
+      "严重程度": "__derived__.严重程度"
+
+  - name: "相关重要信息"
+    type: "single_row"
+    start_row: 2
+    field_map:
+      "相关重要信息": "important_info"
+
+  - name: "不良反应-怀疑用药-合并用药"
+    type: "drug_rows"
+    start_row: 2
+    source_list:
+      - "suspected_drugs"
+      - "concomitant_drugs"
+    column_map:
+      "怀疑/合并": "kind"
+      "序号": "seq"
+      "通用名称": "generic_name"
+      "商品名称": "trade_name"
+      "剂型": "dosage_form"
+      "用量": "dose"
+      "用量单位": "dose_unit"
+      "用药-次数": "frequency"
+      "用药-日数": "days"
+      "给药途径": "route"
+      "用药开始时间": "start_date"
+      "用药结束时间": "end_date"
+      "用药原因": "indication"
