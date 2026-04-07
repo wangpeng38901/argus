@@ -3,7 +3,7 @@
 将 CIOMS PDF 内容映射到数据反馈 Excel 模板。
 
 功能：
-1. 从 GitHub URL 下载 CIOMS PDF 和 Excel 模板；
+1. 从 URL 或本地路径加载 CIOMS PDF 和 Excel 模板；
 2. 判断 PDF 是否为电子档（可提取文本），若疑似扫描件则报错；
 3. 解析 CIOMS 常见字段；
 4. 通过 JSON/YAML 字段映射配置，将结果写入 Excel 模板并保存输出文件。
@@ -84,13 +84,28 @@ class CiomsData:
     concomitant_drugs: List[DrugUsage] = field(default_factory=list)
 
 
-def download_binary(url: str) -> bytes:
+def download_binary(source: str) -> bytes:
+    parts = urllib.parse.urlsplit(source)
+
+    # 支持本地路径（例如 ./CIOMS文件.pdf）
+    if parts.scheme in ("", "file"):
+        if parts.scheme == "file":
+            local_path = Path(urllib.request.url2pathname(parts.path))
+        else:
+            local_path = Path(source).expanduser()
+
+        if not local_path.is_absolute():
+            local_path = (Path.cwd() / local_path).resolve()
+        if not local_path.exists():
+            raise FileNotFoundError(f"本地文件不存在：{local_path}")
+        return local_path.read_bytes()
+
+    # URL 下载路径
     if requests is not None:
-        response = requests.get(url, timeout=30)
+        response = requests.get(source, timeout=30)
         response.raise_for_status()
         return response.content
 
-    parts = urllib.parse.urlsplit(url)
     safe_path = urllib.parse.quote(parts.path, safe="/")
     encoded_url = urllib.parse.urlunsplit((parts.scheme, parts.netloc, safe_path, parts.query, parts.fragment))
     with urllib.request.urlopen(encoded_url, timeout=30) as resp:
@@ -535,8 +550,18 @@ def write_excel(cioms: CiomsData, template_bytes: bytes, output_path: Path, mapp
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="CIOMS PDF -> 数据反馈Excel 映射工具")
-    parser.add_argument("--pdf-url", default=DEFAULT_PDF_URL, help="CIOMS PDF 下载地址")
-    parser.add_argument("--template-url", default=DEFAULT_TEMPLATE_URL, help="Excel 模板下载地址")
+    parser.add_argument(
+        "--pdf-url",
+        "--pdf-source",
+        default=DEFAULT_PDF_URL,
+        help="CIOMS PDF 来源（支持 URL 或本地路径）",
+    )
+    parser.add_argument(
+        "--template-url",
+        "--template-source",
+        default=DEFAULT_TEMPLATE_URL,
+        help="Excel 模板来源（支持 URL 或本地路径）",
+    )
     parser.add_argument(
         "--mapping-config",
         default=str(Path(__file__).resolve().with_name(DEFAULT_MAPPING_FILE_NAME)),
