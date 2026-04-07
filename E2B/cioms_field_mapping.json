@@ -56,15 +56,14 @@
     {
       "name": "药品不良反应报告表-不良反应名称",
       "clear_from_row": 2,
-      "rows": [
-        {
-          "row": 2,
-          "by_column": {
-            "1": {"source": "cioms.reaction_name"},
-            "2": {"source": "computed.report_level"}
-          }
+      "table": {
+        "source": "computed.reaction_rows",
+        "start_row": 2,
+        "by_column": {
+          "1": {"source": "row.reaction_name"},
+          "2": {"source": "row.reaction_level"}
         }
-      ]
+      }
     },
     {
       "name": "相关重要信息",

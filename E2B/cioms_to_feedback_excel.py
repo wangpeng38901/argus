@@ -68,6 +68,7 @@ class CiomsData:
     weight: str = ""
     event_date: str = ""
     reaction_name: str = ""
+    reaction_names: List[str] = field(default_factory=list)
     reaction_description: str = ""
     outcome: str = ""
     severe_criteria: List[str] = field(default_factory=list)
@@ -160,6 +161,29 @@ def parse_checkbox_answer(text: str, question: str, candidates: List[str]) -> st
     return ""
 
 
+def parse_reaction_names(text: str) -> List[str]:
+    block = extract_between(text, "事件报告术语（首位语）（相关症状，如有，用逗号分隔）", "病例描述:")
+    if not block:
+        return []
+
+    names: List[str] = []
+    for raw_line in block.splitlines():
+        line = raw_line.strip()
+        if not line or "事件报告术语" in line:
+            continue
+
+        for part in re.split(r"[，,；;]\s*", line):
+            term = part.strip("，,；;。 ")
+            if not term:
+                continue
+            term = re.sub(r"^#?\d+[)）.、]\s*", "", term)
+            m = re.search(r"（([^）]+)）", term)
+            name = (m.group(1) if m else term).strip()
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
 def parse_cioms(text: str) -> CiomsData:
     data = CiomsData()
     text = normalize_spaces(text)
@@ -203,12 +227,16 @@ def parse_cioms(text: str) -> CiomsData:
     if m:
         data.ethnicity = m.group(1).strip()
 
-    # 反应名称
-    m = re.search(r"事件报告术语.*?\n([^\n]+)", text, re.S)
-    if m:
-        line = m.group(1).strip()
-        name_match = re.search(r"（([^）]+)）", line)
-        data.reaction_name = name_match.group(1) if name_match else line
+    # 反应名称（支持多条）
+    data.reaction_names = parse_reaction_names(text)
+    if data.reaction_names:
+        data.reaction_name = data.reaction_names[0]
+    else:
+        m = re.search(r"事件报告术语.*?\n([^\n]+)", text, re.S)
+        if m:
+            line = m.group(1).strip()
+            name_match = re.search(r"（([^）]+)）", line)
+            data.reaction_name = name_match.group(1) if name_match else line
 
     # 严重性标准
     severe_options = [
@@ -426,6 +454,7 @@ def cioms_to_context(cioms: CiomsData) -> Dict[str, Any]:
         "weight": cioms.weight,
         "event_date": cioms.event_date,
         "reaction_name": cioms.reaction_name,
+        "reaction_names": cioms.reaction_names,
         "reaction_description": cioms.reaction_description,
         "outcome": cioms.outcome,
         "severe_criteria": cioms.severe_criteria,
@@ -445,6 +474,10 @@ def cioms_to_context(cioms: CiomsData) -> Dict[str, Any]:
         "report_level": "严重" if cioms.severe_criteria else "一般",
         "severe_criteria_joined": "；".join(cioms.severe_criteria),
         "drug_rows": [d.__dict__ for d in all_drugs],
+        "reaction_rows": [
+            {"reaction_name": name, "reaction_level": "严重" if cioms.severe_criteria else "一般"}
+            for name in (cioms.reaction_names if cioms.reaction_names else ([cioms.reaction_name] if cioms.reaction_name else []))
+        ],
     }
 
     # 兼容两类配置：
