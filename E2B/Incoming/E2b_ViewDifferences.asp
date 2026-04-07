@@ -388,6 +388,14 @@
 				hideLoading();
 			}
 
+			function fn_BatchSelectFromCheckbox(sControlName, bSelect, sGroup)
+			{
+				fn_SelectImportRows(bSelect, sGroup);
+				var oControl = fn_getElementByName(sControlName);
+				if (oControl)
+					oControl.checked = false;
+			}
+
 			// Save the User Options
 			async function fn_SaveUserOptions()
 			{
@@ -897,15 +905,31 @@
 												</td>
 											</tr>
 											<tr style="height: 25px">
-												<td colspan="2" style="padding-left: 5px">
-													<%BuildButton("btn_select_all", "SELECT_ALL", oTabIndex.NextIndex()).Style("width:90px").OnClick("fn_SelectImportRows(true, 'ALL');").Render()%>
-													<%BuildButton("btn_deselect_all", "DESELECT_ALL", oTabIndex.NextIndex()).Style("width:90px").OnClick("fn_SelectImportRows(false, 'ALL');").Render()%>
-													<%BuildButtonDirect("btn_test_select_all", "TEST " & GetTranslationData("SELECT_ALL"), oTabIndex.NextIndex()).Style("width:115px").OnClick("fn_SelectImportRows(true, 'TEST');").Render()%>
-													<%BuildButtonDirect("btn_test_deselect_all", "TEST " & GetTranslationData("DESELECT_ALL"), oTabIndex.NextIndex()).Style("width:115px").OnClick("fn_SelectImportRows(false, 'TEST');").Render()%>
-													<%BuildButtonDirect("btn_event_select_all", "Event " & GetTranslationData("SELECT_ALL"), oTabIndex.NextIndex()).Style("width:120px").OnClick("fn_SelectImportRows(true, 'EVENT');").Render()%>
-													<%BuildButtonDirect("btn_event_deselect_all", "Event " & GetTranslationData("DESELECT_ALL"), oTabIndex.NextIndex()).Style("width:120px").OnClick("fn_SelectImportRows(false, 'EVENT');").Render()%>
-													<%BuildButtonDirect("btn_drug_select_all", "Drug " & GetTranslationData("SELECT_ALL"), oTabIndex.NextIndex()).Style("width:120px").OnClick("fn_SelectImportRows(true, 'DRUG');").Render()%>
-													<%BuildButtonDirect("btn_drug_deselect_all", "Drug " & GetTranslationData("DESELECT_ALL"), oTabIndex.NextIndex()).Style("width:120px").OnClick("fn_SelectImportRows(false, 'DRUG');").Render()%>
+												<td colspan="2" style="padding: 2px 5px 2px 5px;">
+													<table style="width:100%" cellpadding="0" cellspacing="0">
+														<col style="width:25%" />
+														<col style="width:25%" />
+														<col style="width:25%" />
+														<col style="width:25%" />
+														<tr>
+															<td style="white-space:nowrap;">
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_select_all", false, false, oTabIndex.NextIndex(), GetTranslationData("SELECT_ALL")).Style("margin-right:8px;").OnClick("fn_BatchSelectFromCheckbox('chk_select_all', true, 'ALL');").Render()%>
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_deselect_all", false, false, oTabIndex.NextIndex(), GetTranslationData("DESELECT_ALL")).OnClick("fn_BatchSelectFromCheckbox('chk_deselect_all', false, 'ALL');").Render()%>
+															</td>
+															<td style="white-space:nowrap;">
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_test_select_all", false, false, oTabIndex.NextIndex(), "TEST " & GetTranslationData("SELECT_ALL")).Style("margin-right:8px;").OnClick("fn_BatchSelectFromCheckbox('chk_test_select_all', true, 'TEST');").Render()%>
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_test_deselect_all", false, false, oTabIndex.NextIndex(), "TEST " & GetTranslationData("DESELECT_ALL")).OnClick("fn_BatchSelectFromCheckbox('chk_test_deselect_all', false, 'TEST');").Render()%>
+															</td>
+															<td style="white-space:nowrap;">
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_event_select_all", false, false, oTabIndex.NextIndex(), "Event " & GetTranslationData("SELECT_ALL")).Style("margin-right:8px;").OnClick("fn_BatchSelectFromCheckbox('chk_event_select_all', true, 'EVENT');").Render()%>
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_event_deselect_all", false, false, oTabIndex.NextIndex(), "Event " & GetTranslationData("DESELECT_ALL")).OnClick("fn_BatchSelectFromCheckbox('chk_event_deselect_all', false, 'EVENT');").Render()%>
+															</td>
+															<td style="white-space:nowrap;">
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_drug_select_all", false, false, oTabIndex.NextIndex(), "Drug " & GetTranslationData("SELECT_ALL")).Style("margin-right:8px;").OnClick("fn_BatchSelectFromCheckbox('chk_drug_select_all', true, 'DRUG');").Render()%>
+																<%BuildControlDirect(CTL_CHECKBOX, "chk_drug_deselect_all", false, false, oTabIndex.NextIndex(), "Drug " & GetTranslationData("DESELECT_ALL")).OnClick("fn_BatchSelectFromCheckbox('chk_drug_deselect_all', false, 'DRUG');").Render()%>
+															</td>
+														</tr>
+													</table>
 												</td>
 											</tr>
 										</table>
