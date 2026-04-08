@@ -35,7 +35,7 @@ if errorlevel 1 (
   echo ERROR: Failed to upgrade pip.
   exit /b 1
 )
-%PYEXE% -m pip install --upgrade pyinstaller pyyaml openpyxl pypdf requests
+%PYEXE% -m pip install --upgrade pyinstaller pyyaml openpyxl pypdf requests reportlab
 if errorlevel 1 (
   echo ERROR: Failed to install dependencies.
   exit /b 1
@@ -46,7 +46,7 @@ if exist "build" rmdir /s /q "build"
 if exist "dist" rmdir /s /q "dist"
 if exist "cioms_to_feedback_excel.spec" del /f /q "cioms_to_feedback_excel.spec"
 
-%PYEXE% -m PyInstaller --noconfirm --clean --onefile --name cioms_to_feedback_excel --add-data "cioms_field_mapping.json;." --add-data "cioms_field_mapping.yaml;." "cioms_to_feedback_excel.py"
+%PYEXE% -m PyInstaller --noconfirm --clean --onefile --name cioms_to_feedback_excel --hidden-import reportlab --hidden-import reportlab.pdfbase.cidfonts --hidden-import reportlab.platypus --add-data "cioms_field_mapping.json;." --add-data "cioms_field_mapping.yaml;." "cioms_to_feedback_excel.py"
 if errorlevel 1 (
   echo ERROR: PyInstaller build failed.
   exit /b 1

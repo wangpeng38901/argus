@@ -112,6 +112,15 @@ class CiomsData:
     concomitant_drugs: List[DrugUsage] = field(default_factory=list)
 
 
+@dataclass
+class ProcessResult:
+    page_count: int
+    output_path: Path
+    report_code: str
+    first_drug_name: str
+    processed_at: str
+
+
 def download_binary(source: str) -> bytes:
     parts = urllib.parse.urlsplit(source)
     scheme = (parts.scheme or "").lower()
@@ -1071,6 +1080,41 @@ def ensure_sheet_and_headers(wb, sheet_cfg: Dict[str, Any]):
     return sheet
 
 
+def generate_cover_pdf(output_path: Path, rows: List[Tuple[str, str, str]]) -> None:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+    except ImportError as exc:
+        raise RuntimeError("生成 cover PDF 需要安装 reportlab：pip install reportlab") from exc
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+
+    data: List[List[str]] = [["报告编号", "第一个药品名称", "本次处理的日期时间"]]
+    for report_code, first_drug, processed_at in rows:
+        data.append([report_code or "", first_drug or "", processed_at or ""])
+
+    doc = SimpleDocTemplate(str(output_path), pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
+    table = Table(data, colWidths=[170, 180, 170], repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, -1), "STSong-Light"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.whitesmoke]),
+            ]
+        )
+    )
+    doc.build([table])
+
+
 def write_excel(cioms: CiomsData, template_bytes: bytes, output_path: Path, mapping_cfg: Dict[str, Any]) -> None:
     wb = load_workbook(io.BytesIO(template_bytes))
     context = cioms_to_context(cioms)
@@ -1103,7 +1147,7 @@ def process_single_pdf(
     template_source: str,
     mapping_cfg: Dict[str, Any],
     output_path: Path,
-) -> Tuple[int, Path]:
+) -> ProcessResult:
     pdf_bytes = download_binary(pdf_source)
     ok, page_texts = detect_electronic_pdf(pdf_bytes)
     if not ok:
@@ -1113,7 +1157,19 @@ def process_single_pdf(
     cioms = parse_cioms(full_text)
     template_bytes = download_binary(template_source)
     write_excel(cioms, template_bytes, output_path, mapping_cfg)
-    return len(page_texts), output_path
+    first_drug_name = ""
+    if cioms.suspected_drugs:
+        first_drug_name = cioms.suspected_drugs[0].generic_name
+    elif cioms.concomitant_drugs:
+        first_drug_name = cioms.concomitant_drugs[0].generic_name
+
+    return ProcessResult(
+        page_count=len(page_texts),
+        output_path=output_path,
+        report_code=cioms.report_code,
+        first_drug_name=first_drug_name,
+        processed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
 
 
 def main() -> None:
@@ -1148,11 +1204,11 @@ def main() -> None:
     # 单文件模式
     if str(args.pdf_url).strip():
         output = Path(args.output).resolve()
-        page_count, out = process_single_pdf(args.pdf_url, args.template_url, mapping_cfg, output)
+        result = process_single_pdf(args.pdf_url, args.template_url, mapping_cfg, output)
         print("处理完成：")
-        print(f"- 电子档校验：通过（共 {page_count} 页）")
+        print(f"- 电子档校验：通过（共 {result.page_count} 页）")
         print(f"- 映射配置：{mapping_path}")
-        print(f"- 输出文件：{out}")
+        print(f"- 输出文件：{result.output_path}")
         return
 
     # 批处理模式：当前目录全部 PDF
@@ -1167,10 +1223,16 @@ def main() -> None:
     print(f"- 映射配置：{mapping_path}")
     print(f"- 待处理 PDF 数量：{len(pdf_files)}")
 
+    cover_rows: List[Tuple[str, str, str]] = []
     for pdf in pdf_files:
         out = pdf.with_suffix(".xlsx")
-        page_count, out_path = process_single_pdf(str(pdf), args.template_url, mapping_cfg, out)
-        print(f"  · {pdf.name} -> {out_path.name} （{page_count} 页，电子档校验通过）")
+        result = process_single_pdf(str(pdf), args.template_url, mapping_cfg, out)
+        cover_rows.append((result.report_code, result.first_drug_name, result.processed_at))
+        print(f"  · {pdf.name} -> {result.output_path.name} （{result.page_count} 页，电子档校验通过）")
+
+    cover_pdf = cwd / "cover.pdf"
+    generate_cover_pdf(cover_pdf, cover_rows)
+    print(f"- 汇总封面：{cover_pdf.name}")
 
 
 if __name__ == "__main__":
