@@ -18,7 +18,6 @@ import re
 import sys
 import urllib.parse
 import urllib.request
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -36,7 +35,6 @@ except Exception:
 DEFAULT_PDF_URL = ""
 DEFAULT_TEMPLATE_URL = "./数据反馈结果模板.xlsx"
 DEFAULT_MAPPING_FILE_NAME = "cioms_field_mapping.json"
-_GENERATED_FEEDBACK_CODES: set[str] = set()
 
 
 def get_default_mapping_path() -> Path:
@@ -772,21 +770,6 @@ def clear_sheet_from_row(sheet, row_start: int = 2) -> None:
         sheet.delete_rows(row_start, sheet.max_row - row_start + 1)
 
 
-def generate_unique_feedback_code() -> str:
-    """
-    生成唯一反馈码（24位数字）：
-    - 20位时间戳：YYYYMMDDHHMMSSffffff
-    - 4位随机数：0000-9999
-    """
-    while True:
-        ts = datetime.now().strftime("%Y%m%d%H%M%S%f")
-        rnd = f"{uuid.uuid4().int % 10000:04d}"
-        code = f"{ts}{rnd}"
-        if code not in _GENERATED_FEEDBACK_CODES:
-            _GENERATED_FEEDBACK_CODES.add(code)
-            return code
-
-
 def load_mapping_config(config_path: Path) -> Dict[str, Any]:
     suffix = config_path.suffix.lower()
     raw = config_path.read_text(encoding="utf-8")
@@ -981,8 +964,18 @@ def apply_list_sheet_mapping(sheet, sheet_cfg: Dict[str, Any], global_ctx: Dict[
 
 
 def fill_feedback_code_from_template(wb, global_ctx: Dict[str, Any]) -> None:
-    # 反馈码始终自动生成唯一值，不再复用模板中的固定值
-    code = generate_unique_feedback_code()
+    # 反馈码填写 24b. 生产企业控制编号（cioms.report_code）
+    code = str(get_by_path(global_ctx, "cioms.report_code") or "").strip()
+    if not code:
+        # 兜底：若 24b 未解析到，则使用模板中的原反馈码
+        if "药品不良反应报告表" in wb.sheetnames:
+            sheet = wb["药品不良反应报告表"]
+            headers = header_to_col_map(sheet, 1)
+            col = headers.get("反馈码")
+            if col:
+                val = sheet.cell(2, col).value
+                if val not in (None, ""):
+                    code = str(val).strip()
     global_ctx["feedback_code"] = code
     global_ctx["template_feedback_code"] = code
 
