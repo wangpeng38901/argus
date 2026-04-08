@@ -15,6 +15,7 @@ import argparse
 import io
 import json
 import re
+import sys
 import urllib.parse
 import urllib.request
 import uuid
@@ -36,6 +37,22 @@ DEFAULT_PDF_URL = ""
 DEFAULT_TEMPLATE_URL = "./数据反馈结果模板.xlsx"
 DEFAULT_MAPPING_FILE_NAME = "cioms_field_mapping.json"
 _GENERATED_FEEDBACK_CODES: set[str] = set()
+
+
+def get_default_mapping_path() -> Path:
+    """
+    获取默认映射配置路径：
+    - 源码运行：脚本同目录 cioms_field_mapping.json
+    - PyInstaller 运行：优先 _MEIPASS 中打包资源，其次 exe 同目录
+    """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            bundled = Path(meipass) / DEFAULT_MAPPING_FILE_NAME
+            if bundled.exists():
+                return bundled
+        return Path(sys.executable).resolve().with_name(DEFAULT_MAPPING_FILE_NAME)
+    return Path(__file__).resolve().with_name(DEFAULT_MAPPING_FILE_NAME)
 
 
 @dataclass
