@@ -628,7 +628,23 @@ def parse_cioms(text: str) -> CiomsData:
             item.days = m.group(2)
         drugs[idx] = item
 
-    # 续页 14-19（有些文档怀疑药只有续页里完整给药间期）
+    # 若未直接解析出用药日数，基于给药起止日期兜底推断（首页数据）
+    for idx in list(drugs.keys()):
+        item = drugs[idx]
+        if (not item.days) and item.start_date and item.end_date and item.end_date not in {"继续", "不明"}:
+            item.days = day_span_inclusive(item.start_date, item.end_date)
+        drugs[idx] = item
+
+    # 首页怀疑药（每个药物至少输出一条）
+    suspected_rows: List[DrugUsage] = []
+    for idx in sorted(suspect_ids):
+        item = drugs.get(idx)
+        if not item or not item.generic_name:
+            continue
+        item.kind = "怀疑"
+        suspected_rows.append(item)
+
+    # 续页 14-19（按“给药方案”逐条展开输出）
     cont_block = extract_first_non_empty_between(
         text,
         [
@@ -649,9 +665,16 @@ def parse_cioms(text: str) -> CiomsData:
                 continue
             idx = int(m.group(1))
             suspect_ids.add(idx)
-            item = drugs.get(idx, DrugUsage(seq=idx))
-            item.generic_name = item.generic_name or m.group(2).strip()
-            item.trade_name = item.trade_name or m.group(3).strip()
+            base = drugs.get(idx, DrugUsage(seq=idx))
+            item = DrugUsage(
+                seq=idx,
+                generic_name=base.generic_name or m.group(2).strip(),
+                trade_name=base.trade_name or m.group(3).strip(),
+                dosage_form=base.dosage_form,
+                route=base.route,
+                indication=base.indication,
+                kind="怀疑",
+            )
             tail = m.group(4).strip()
             if ("注射剂" in tail) and not item.dosage_form:
                 item.dosage_form = "注射剂"
@@ -663,23 +686,19 @@ def parse_cioms(text: str) -> CiomsData:
                 line = cont_lines[j]
                 d = re.match(r"([\d.]+)\s*(mg|g|ml|ug|μg|毫克|克|毫升)\s*,\s*([^\n]+)", line)
                 if d:
-                    if not item.dose:
-                        item.dose = d.group(1)
-                    if not item.dose_unit:
-                        item.dose_unit = d.group(2).replace("μg", "ug")
-                    if not item.frequency:
-                        freq_raw = d.group(3).strip().rstrip("；;。")
-                        count_val, cycle_days = parse_frequency_count_and_cycle_days(freq_raw)
-                        item.frequency = count_val if count_val else freq_raw
-                        if cycle_days:
-                            item.days = cycle_days
+                    item.dose = d.group(1)
+                    item.dose_unit = d.group(2).replace("μg", "ug")
+                    freq_raw = d.group(3).strip().rstrip("；;。")
+                    count_val, cycle_days = parse_frequency_count_and_cycle_days(freq_raw)
+                    item.frequency = count_val if count_val else freq_raw
+                    if cycle_days:
+                        item.days = cycle_days
                 elif re.match(r"\d{4}年\d{2}月\d{2}日\s*/\s*(\d{4}年\d{2}月\d{2}日|继续|不明);?$", line):
                     dm = re.match(r"(\d{4}年\d{2}月\d{2}日)\s*/\s*(\d{4}年\d{2}月\d{2}日|继续|不明);?$", line)
                     if dm:
-                        item.start_date = item.start_date or to_iso_date(dm.group(1))
+                        item.start_date = to_iso_date(dm.group(1))
                         end_raw = dm.group(2)
-                        if not item.end_date:
-                            item.end_date = to_iso_date(end_raw) if "年" in end_raw else end_raw
+                        item.end_date = to_iso_date(end_raw) if "年" in end_raw else end_raw
                 elif re.match(r"[\d.]+\s*day", line):
                     if not item.days:
                         item.days = re.match(r"([\d.]+)\s*day", line).group(1)
@@ -687,22 +706,33 @@ def parse_cioms(text: str) -> CiomsData:
                     item.route = line
                 j += 1
 
-            drugs[idx] = item
+            if (not item.days) and item.start_date and item.end_date and item.end_date not in {"继续", "不明"}:
+                item.days = day_span_inclusive(item.start_date, item.end_date)
+            if item.generic_name and (item.dose or item.start_date or item.frequency):
+                suspected_rows.append(item)
             i = j
 
-    # 若未直接解析出用药日数，基于给药起止日期兜底推断
-    for idx in list(drugs.keys()):
-        item = drugs[idx]
-        if (not item.days) and item.start_date and item.end_date and item.end_date not in {"继续", "不明"}:
-            item.days = day_span_inclusive(item.start_date, item.end_date)
-        drugs[idx] = item
-
-    # 只保留较小序号（主页明确列出的怀疑药）
-    for idx in sorted(suspect_ids):
-        item = drugs[idx]
-        if item.generic_name:
-            item.kind = "怀疑"
-            data.suspected_drugs.append(item)
+    # 去重后输出怀疑药（保留所有给药方案）
+    seen_suspected = set()
+    for item in suspected_rows:
+        key = (
+            item.seq,
+            item.generic_name,
+            item.trade_name,
+            item.dosage_form,
+            item.dose,
+            item.dose_unit,
+            item.frequency,
+            item.days,
+            item.route,
+            item.start_date,
+            item.end_date,
+            item.indication,
+        )
+        if key in seen_suspected:
+            continue
+        seen_suspected.add(key)
+        data.suspected_drugs.append(item)
 
     # 合并用药
     in_concomitant = False
