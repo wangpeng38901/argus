@@ -535,16 +535,24 @@ def parse_cioms(text: str) -> CiomsData:
         if m:
             data.primary_disease = m.group(1).strip()
 
-    # 重要信息：实验室检查（兼容“13. 实验室检查”与“13. 相关实验室检查”两种标题）
+    # 重要信息：仅输出“13. 相关实验室检查”段
     data.important_info = extract_first_non_empty_between(
         text,
         [
-            ("13. 实验室检查", "13. 相关实验室检查"),
-            ("13. 实验室检查", "14-19. 怀疑药物（续）"),
             ("13. 相关实验室检查", "14-19. 怀疑药物（续）"),
             ("13. 相关实验室检查", "14. 怀疑药物"),
+            ("13. 相关实验室检查", "23. 其他相关病史（续）"),
+            ("13. 相关实验室检查", "23. 其他相关病史"),
         ],
     )
+    # 清洗误提取的后续章节标题，保证只保留“13.相关实验室检查”正文内容
+    if data.important_info:
+        cleaned_lines: List[str] = []
+        for ln in [x.strip() for x in data.important_info.splitlines() if x.strip()]:
+            if re.match(r"^(14-19\.\s*怀疑药物（续）?|14\.\s*怀疑药物.*|23\.\s*其他相关病史.*|IV\.\s*公司信息.*)$", ln):
+                continue
+            cleaned_lines.append(ln)
+        data.important_info = "\n".join(cleaned_lines).strip()
     data.lab_items = parse_lab_items_from_text(text)
 
     # 怀疑用药（主页区块，仅 #1/#2 这组结构化字段最稳定）
