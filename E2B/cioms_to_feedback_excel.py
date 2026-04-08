@@ -18,6 +18,7 @@ import re
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -125,6 +126,19 @@ def to_iso_date(cn_date: str) -> str:
         return ""
     year, month, day = m.groups()
     return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+
+def day_span_inclusive(start_iso: str, end_iso: str) -> str:
+    try:
+        if not start_iso or not end_iso:
+            return ""
+        s = datetime.strptime(start_iso, "%Y-%m-%d")
+        e = datetime.strptime(end_iso, "%Y-%m-%d")
+        if e < s:
+            return ""
+        return str((e - s).days + 1)
+    except Exception:
+        return ""
 
 
 def extract_between(text: str, start: str, end: str) -> str:
@@ -356,9 +370,6 @@ def parse_cioms(text: str) -> CiomsData:
         freq_raw = m.group(4).strip()
         freq_count = re.search(r"(\d+)\s*次", freq_raw)
         item.frequency = freq_count.group(1) if freq_count else freq_raw
-        if not item.days:
-            day_m = re.search(r"(\d+)\s*次", freq_raw)
-            item.days = day_m.group(1) if day_m else ""
         drugs[idx] = item
 
     # 给药途径
@@ -376,8 +387,14 @@ def parse_cioms(text: str) -> CiomsData:
         item.indication = m.group(2).strip()
         drugs[idx] = item
 
-    # 开始结束日期
-    date_block = extract_between(text, "18. 给药日期（从/到）", "19. 给药持续时间")
+    # 开始结束日期（兼容“19. 给药持续时间”与“19. 给药间期”）
+    date_block = extract_first_non_empty_between(
+        text,
+        [
+            ("18. 给药日期（从/到）", "19. 给药持续时间"),
+            ("18. 给药日期（从/到）", "19. 给药间期"),
+        ],
+    )
     for m in re.finditer(r"#(\d+)\)\s*(\d{4}年\d{2}月\d{2}日)\s*/\s*(\d{4}年\d{2}月\d{2}日|继续|不明)", date_block):
         idx = int(m.group(1))
         item = drugs.get(idx, DrugUsage(seq=idx))
@@ -386,12 +403,87 @@ def parse_cioms(text: str) -> CiomsData:
         item.end_date = to_iso_date(end_raw) if "年" in end_raw else end_raw
         drugs[idx] = item
 
-    # 持续时间
-    duration_block = extract_between(text, "19. 给药持续时间", "□是□否□不明")
+    # 持续时间/给药间期（兼容不同模板）
+    duration_block = extract_first_non_empty_between(
+        text,
+        [
+            ("19. 给药持续时间", "□是□否□不明"),
+            ("19. 给药持续时间", "III.合并药物与病史"),
+            ("19. 给药间期", "22. 合并药物和给药日期"),
+            ("19. 给药间期", "23. 其他相关病史"),
+        ],
+    )
     for m in re.finditer(r"#(\d+)\)\s*([\d.]+)\s*day", duration_block):
         idx = int(m.group(1))
         item = drugs.get(idx, DrugUsage(seq=idx))
         item.days = m.group(2)
+        drugs[idx] = item
+
+    # 续页 14-19（有些文档怀疑药只有续页里完整给药间期）
+    cont_block = extract_first_non_empty_between(
+        text,
+        [
+            ("14-19. 怀疑药物（续）", "22. 合并药物和给药日期（续）"),
+            ("14-19. 怀疑药物（续）", "22. 合并药物和给药日期"),
+            ("14-19. 怀疑药物（续）", "23. 其他相关病史（续）"),
+            ("14-19. 怀疑药物（续）", "23. 其他相关病史"),
+            ("14-19. 怀疑药物（续）", "IV.公司信息"),
+        ],
+    )
+    if cont_block:
+        cont_lines = [ln.strip() for ln in cont_block.splitlines() if ln.strip()]
+        i = 0
+        while i < len(cont_lines):
+            m = re.match(r"#(\d+)\)\s*([^(#]+?)\(([^)]+)\)\s*(.*)$", cont_lines[i])
+            if not m:
+                i += 1
+                continue
+            idx = int(m.group(1))
+            suspect_ids.add(idx)
+            item = drugs.get(idx, DrugUsage(seq=idx))
+            item.generic_name = item.generic_name or m.group(2).strip()
+            item.trade_name = item.trade_name or m.group(3).strip()
+            tail = m.group(4).strip()
+            if ("注射剂" in tail) and not item.dosage_form:
+                item.dosage_form = "注射剂"
+            if ("冻干粉" in tail) and not item.dosage_form:
+                item.dosage_form = "冻干粉"
+
+            j = i + 1
+            while j < len(cont_lines) and not re.match(r"#\d+\)\s*", cont_lines[j]):
+                line = cont_lines[j]
+                d = re.match(r"([\d.]+)\s*(mg|g|ml|ug|μg|毫克|克|毫升)\s*,\s*([^\n]+)", line)
+                if d:
+                    if not item.dose:
+                        item.dose = d.group(1)
+                    if not item.dose_unit:
+                        item.dose_unit = d.group(2).replace("μg", "ug")
+                    if not item.frequency:
+                        freq_raw = d.group(3).strip()
+                        freq_count = re.search(r"(\d+)\s*次", freq_raw)
+                        item.frequency = freq_count.group(1) if freq_count else freq_raw
+                elif re.match(r"\d{4}年\d{2}月\d{2}日\s*/\s*(\d{4}年\d{2}月\d{2}日|继续|不明);?$", line):
+                    dm = re.match(r"(\d{4}年\d{2}月\d{2}日)\s*/\s*(\d{4}年\d{2}月\d{2}日|继续|不明);?$", line)
+                    if dm:
+                        item.start_date = item.start_date or to_iso_date(dm.group(1))
+                        end_raw = dm.group(2)
+                        if not item.end_date:
+                            item.end_date = to_iso_date(end_raw) if "年" in end_raw else end_raw
+                elif re.match(r"[\d.]+\s*day", line):
+                    if not item.days:
+                        item.days = re.match(r"([\d.]+)\s*day", line).group(1)
+                elif ("滴注" in line or "口服" in line or "注射" in line) and not item.route:
+                    item.route = line
+                j += 1
+
+            drugs[idx] = item
+            i = j
+
+    # 若未直接解析出用药日数，基于给药起止日期兜底推断
+    for idx in list(drugs.keys()):
+        item = drugs[idx]
+        if (not item.days) and item.start_date and item.end_date and item.end_date not in {"继续", "不明"}:
+            item.days = day_span_inclusive(item.start_date, item.end_date)
         drugs[idx] = item
 
     # 只保留较小序号（主页明确列出的怀疑药）
