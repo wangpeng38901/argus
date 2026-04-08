@@ -31,11 +31,8 @@ except Exception:
     requests = None
 
 
-DEFAULT_PDF_URL = "https://raw.githubusercontent.com/wangpeng38901/argus/main/CIOMS/CIOMS文件.pdf"
-DEFAULT_TEMPLATE_URL = (
-    "https://raw.githubusercontent.com/wangpeng38901/argus/main/CIOMS/"
-    "数据反馈结果-14910028650182082562330.xlsx"
-)
+DEFAULT_PDF_URL = ""
+DEFAULT_TEMPLATE_URL = "./数据反馈结果模板.xlsx"
 DEFAULT_MAPPING_FILE_NAME = "cioms_field_mapping.json"
 
 
@@ -1052,13 +1049,31 @@ def write_excel(cioms: CiomsData, template_bytes: bytes, output_path: Path, mapp
     wb.save(output_path)
 
 
+def process_single_pdf(
+    pdf_source: str,
+    template_source: str,
+    mapping_cfg: Dict[str, Any],
+    output_path: Path,
+) -> Tuple[int, Path]:
+    pdf_bytes = download_binary(pdf_source)
+    ok, page_texts = detect_electronic_pdf(pdf_bytes)
+    if not ok:
+        raise RuntimeError(f"检测失败：{pdf_source} 疑似扫描件（可提取文本不足），请提供电子档 PDF。")
+
+    full_text = "\n".join(page_texts)
+    cioms = parse_cioms(full_text)
+    template_bytes = download_binary(template_source)
+    write_excel(cioms, template_bytes, output_path, mapping_cfg)
+    return len(page_texts), output_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="CIOMS PDF -> 数据反馈Excel 映射工具")
     parser.add_argument(
         "--pdf-url",
         "--pdf-source",
         default=DEFAULT_PDF_URL,
-        help="CIOMS PDF 来源（支持 URL 或本地路径）",
+        help="CIOMS PDF 来源（支持 URL 或本地路径）。为空时自动处理当前目录全部 PDF",
     )
     parser.add_argument(
         "--template-url",
@@ -1074,27 +1089,39 @@ def main() -> None:
     parser.add_argument(
         "--output",
         default="output_数据反馈结果-14910028650182082562330.xlsx",
-        help="输出 Excel 路径",
+        help="输出 Excel 路径（单文件模式使用）",
     )
     args = parser.parse_args()
 
-    pdf_bytes = download_binary(args.pdf_url)
-    ok, page_texts = detect_electronic_pdf(pdf_bytes)
-    if not ok:
-        raise RuntimeError("检测失败：CIOMS PDF 疑似扫描件（可提取文本不足），请提供电子档 PDF。")
-
-    full_text = "\n".join(page_texts)
-    cioms = parse_cioms(full_text)
-
-    template_bytes = download_binary(args.template_url)
     mapping_cfg = load_mapping_config(Path(args.mapping_config).resolve())
-    output = Path(args.output).resolve()
-    write_excel(cioms, template_bytes, output, mapping_cfg)
+    mapping_path = Path(args.mapping_config).resolve()
 
-    print("处理完成：")
-    print(f"- 电子档校验：通过（共 {len(page_texts)} 页）")
-    print(f"- 映射配置：{Path(args.mapping_config).resolve()}")
-    print(f"- 输出文件：{output}")
+    # 单文件模式
+    if str(args.pdf_url).strip():
+        output = Path(args.output).resolve()
+        page_count, out = process_single_pdf(args.pdf_url, args.template_url, mapping_cfg, output)
+        print("处理完成：")
+        print(f"- 电子档校验：通过（共 {page_count} 页）")
+        print(f"- 映射配置：{mapping_path}")
+        print(f"- 输出文件：{out}")
+        return
+
+    # 批处理模式：当前目录全部 PDF
+    cwd = Path.cwd()
+    pdf_files = sorted(cwd.glob("*.pdf"))
+    if not pdf_files:
+        raise RuntimeError(f"当前目录未找到 PDF 文件：{cwd}")
+
+    print("批处理模式：")
+    print(f"- 目录：{cwd}")
+    print(f"- 模板：{args.template_url}")
+    print(f"- 映射配置：{mapping_path}")
+    print(f"- 待处理 PDF 数量：{len(pdf_files)}")
+
+    for pdf in pdf_files:
+        out = pdf.with_suffix(".xlsx")
+        page_count, out_path = process_single_pdf(str(pdf), args.template_url, mapping_cfg, out)
+        print(f"  · {pdf.name} -> {out_path.name} （{page_count} 页，电子档校验通过）")
 
 
 if __name__ == "__main__":
