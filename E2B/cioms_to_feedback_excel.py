@@ -117,7 +117,7 @@ class ProcessResult:
     page_count: int
     output_path: Path
     report_code: str
-    first_drug_name: str
+    suspected_drug_names: str
     processed_at: str
 
 
@@ -1093,9 +1093,9 @@ def generate_cover_pdf(output_path: Path, rows: List[Tuple[str, str, str]]) -> N
     output_path.parent.mkdir(parents=True, exist_ok=True)
     pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
 
-    data: List[List[str]] = [["报告编号", "第一个药品名称", "本次处理的日期时间"]]
-    for report_code, first_drug, processed_at in rows:
-        data.append([report_code or "", first_drug or "", processed_at or ""])
+    data: List[List[str]] = [["报告编号", "怀疑用药", "本次处理的日期时间"]]
+    for report_code, suspected_drugs, processed_at in rows:
+        data.append([report_code or "", suspected_drugs or "", processed_at or ""])
 
     doc = SimpleDocTemplate(str(output_path), pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
     table = Table(data, colWidths=[170, 180, 170], repeatRows=1)
@@ -1157,17 +1157,18 @@ def process_single_pdf(
     cioms = parse_cioms(full_text)
     template_bytes = download_binary(template_source)
     write_excel(cioms, template_bytes, output_path, mapping_cfg)
-    first_drug_name = ""
-    if cioms.suspected_drugs:
-        first_drug_name = cioms.suspected_drugs[0].generic_name
-    elif cioms.concomitant_drugs:
-        first_drug_name = cioms.concomitant_drugs[0].generic_name
+    suspected_name_list: List[str] = []
+    for d in cioms.suspected_drugs:
+        name = (d.generic_name or d.trade_name or "").strip()
+        if name and name not in suspected_name_list:
+            suspected_name_list.append(name)
+    suspected_drug_names = "；".join(suspected_name_list)
 
     return ProcessResult(
         page_count=len(page_texts),
         output_path=output_path,
         report_code=cioms.report_code,
-        first_drug_name=first_drug_name,
+        suspected_drug_names=suspected_drug_names,
         processed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     )
 
@@ -1227,7 +1228,7 @@ def main() -> None:
     for pdf in pdf_files:
         out = pdf.with_suffix(".xlsx")
         result = process_single_pdf(str(pdf), args.template_url, mapping_cfg, out)
-        cover_rows.append((result.report_code, result.first_drug_name, result.processed_at))
+        cover_rows.append((result.report_code, result.suspected_drug_names, result.processed_at))
         print(f"  · {pdf.name} -> {result.output_path.name} （{result.page_count} 页，电子档校验通过）")
 
     cover_pdf = cwd / "cover.pdf"
