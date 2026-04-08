@@ -57,6 +57,17 @@ class DrugUsage:
 
 
 @dataclass
+class LabCheck:
+    check_date: str = ""
+    check_name: str = ""
+    assessment: str = ""
+    result_value: str = ""
+    result_unit: str = ""
+    normal_low: str = ""
+    normal_high: str = ""
+
+
+@dataclass
 class CiomsData:
     report_code: str = ""
     report_type: str = ""
@@ -82,6 +93,7 @@ class CiomsData:
     notes: str = ""
     primary_disease: str = ""
     important_info: str = ""
+    lab_items: List[LabCheck] = field(default_factory=list)
     suspected_drugs: List[DrugUsage] = field(default_factory=list)
     concomitant_drugs: List[DrugUsage] = field(default_factory=list)
 
@@ -219,6 +231,100 @@ def parse_cycle_days_from_frequency_text(freq_raw: str) -> str:
         if unit == "h":
             return "1"
     return ""
+
+
+def parse_lab_items_from_text(text: str) -> List[LabCheck]:
+    lab_block = extract_first_non_empty_between(
+        text,
+        [
+            ("13. 实验室检查", "13. 相关实验室检查"),
+            ("13. 实验室检查", "14-19. 怀疑药物（续）"),
+            ("13. 相关实验室检查", "14-19. 怀疑药物（续）"),
+        ],
+    )
+    if not lab_block:
+        return []
+
+    # 清理分页噪声：公司编号/附加信息时间戳
+    lab_text = re.sub(
+        r"公司编号[:：]\s*[A-Z]\d+\s*附加信息\s*\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2}",
+        " ",
+        lab_block,
+    )
+    lab_text = re.sub(r"#\s*日期\s*检查/评估/注释\s*结果\s*正常范围\s*高/低", " ", lab_text)
+    lab_text = re.sub(r"\s+", " ", lab_text).strip()
+    if not lab_text:
+        return []
+
+    row_chunks = re.split(r"(?=\b\d{1,2}\s+\d{4}年\d{2}月\d{2}日\b)", lab_text)
+    items: List[LabCheck] = []
+    for chunk in row_chunks:
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+
+        m = re.match(r"(\d{1,2})\s+(\d{4}年\d{2}月\d{2}日)\s+(.+)$", chunk)
+        if not m:
+            continue
+
+        date_iso = to_iso_date(m.group(2))
+        rest = m.group(3).strip()
+        if not rest:
+            continue
+
+        # 模式A：名称 [评估] 结果值 单位 正常高 正常低
+        ma = re.match(
+            r"(.+?)\s+([<>]?\d+(?:\.\d+)?)\s*([^\s]+)\s+([<>]?\d+(?:\.\d+)?)\s+([<>]?\d+(?:\.\d+)?)$",
+            rest,
+        )
+        # 模式B：名称 结果值 单位 正常高 评估 正常低（跨页噪声常见）
+        mb = re.match(
+            r"(.+?)\s+([<>]?\d+(?:\.\d+)?)\s*([^\s]+)\s+([<>]?\d+(?:\.\d+)?)\s+(升高|降低|正常|异常)\s+([<>]?\d+(?:\.\d+)?)$",
+            rest,
+        )
+
+        check_name = ""
+        assessment = ""
+        result_value = ""
+        result_unit = ""
+        normal_high = ""
+        normal_low = ""
+
+        if ma:
+            name_and_assess = ma.group(1).strip()
+            result_value = ma.group(2).strip()
+            result_unit = ma.group(3).strip()
+            normal_high = ma.group(4).strip()
+            normal_low = ma.group(5).strip()
+            m_assess = re.match(r"(.+?)\s+(升高|降低|正常|异常)$", name_and_assess)
+            if m_assess:
+                check_name = m_assess.group(1).strip()
+                assessment = m_assess.group(2).strip()
+            else:
+                check_name = name_and_assess
+        elif mb:
+            check_name = mb.group(1).strip()
+            result_value = mb.group(2).strip()
+            result_unit = mb.group(3).strip()
+            normal_high = mb.group(4).strip()
+            assessment = mb.group(5).strip()
+            normal_low = mb.group(6).strip()
+        else:
+            continue
+
+        items.append(
+            LabCheck(
+                check_date=date_iso,
+                check_name=check_name,
+                assessment=assessment,
+                result_value=result_value,
+                result_unit=result_unit,
+                normal_low=normal_low,
+                normal_high=normal_high,
+            )
+        )
+
+    return items
 
 
 def extract_between(text: str, start: str, end: str) -> str:
@@ -414,6 +520,7 @@ def parse_cioms(text: str) -> CiomsData:
             ("13. 相关实验室检查", "14. 怀疑药物"),
         ],
     )
+    data.lab_items = parse_lab_items_from_text(text)
 
     # 怀疑用药（主页区块，仅 #1/#2 这组结构化字段最稳定）
     main_suspect_block = extract_between(text, "14. 怀疑药物（包括通用名称）", "20. 停药后反应减轻了吗？")
@@ -662,6 +769,7 @@ def cioms_to_context(cioms: CiomsData) -> Dict[str, Any]:
         "notes": cioms.notes,
         "primary_disease": cioms.primary_disease,
         "important_info": cioms.important_info,
+        "lab_items": [x.__dict__ for x in cioms.lab_items],
         "suspected_drugs": [d.__dict__ for d in cioms.suspected_drugs],
         "concomitant_drugs": [d.__dict__ for d in cioms.concomitant_drugs],
     }
@@ -673,6 +781,7 @@ def cioms_to_context(cioms: CiomsData) -> Dict[str, Any]:
             {"reaction_name": name, "reaction_level": "严重" if cioms.severe_criteria else "一般"}
             for name in (cioms.reaction_names if cioms.reaction_names else ([cioms.reaction_name] if cioms.reaction_name else []))
         ],
+        "lab_rows": [x.__dict__ for x in cioms.lab_items],
     }
 
     # 兼容两类配置：
@@ -709,6 +818,7 @@ def cioms_to_context(cioms: CiomsData) -> Dict[str, Any]:
         "reaction_level": computed["report_level"],
         "important_info": cioms.important_info,
         "all_drugs": computed["drug_rows"],
+        "lab_rows": computed["lab_rows"],
     }
 
 
@@ -895,6 +1005,26 @@ def apply_legacy_table_mapping(sheet, sheet_cfg: Dict[str, Any], global_ctx: Dic
             sheet.cell(row_idx, int(col_text), value=value)
 
 
+def ensure_sheet_and_headers(wb, sheet_cfg: Dict[str, Any]):
+    sheet_name = sheet_cfg.get("name")
+    if not sheet_name:
+        return None
+
+    sheet = wb[sheet_name] if sheet_name in wb.sheetnames else None
+    if sheet is None and sheet_cfg.get("create_if_missing"):
+        sheet = wb.create_sheet(title=sheet_name)
+
+    if sheet is None:
+        return None
+
+    headers = sheet_cfg.get("headers", [])
+    if isinstance(headers, list) and headers:
+        for idx, h in enumerate(headers, start=1):
+            if h is not None and str(h).strip() != "":
+                sheet.cell(1, idx, value=str(h))
+    return sheet
+
+
 def write_excel(cioms: CiomsData, template_bytes: bytes, output_path: Path, mapping_cfg: Dict[str, Any]) -> None:
     wb = load_workbook(io.BytesIO(template_bytes))
     context = cioms_to_context(cioms)
@@ -902,10 +1032,9 @@ def write_excel(cioms: CiomsData, template_bytes: bytes, output_path: Path, mapp
 
     sheets_cfg = mapping_cfg.get("sheets", [])
     for sheet_cfg in sheets_cfg:
-        sheet_name = sheet_cfg.get("name")
-        if not sheet_name or sheet_name not in wb.sheetnames:
+        sheet = ensure_sheet_and_headers(wb, sheet_cfg)
+        if sheet is None:
             continue
-        sheet = wb[sheet_name]
         # 兼容旧配置结构（rows/table）与新配置结构（mode/mappings）
         if "rows" in sheet_cfg:
             apply_legacy_rows_mapping(sheet, sheet_cfg, context)

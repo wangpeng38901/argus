@@ -78,6 +78,33 @@
       ]
     },
     {
+      "name": "实验室检查",
+      "create_if_missing": true,
+      "headers": [
+        "检查日期",
+        "检查名称",
+        "评估",
+        "检查结果数值",
+        "检查结果单位",
+        "正常范围低",
+        "正常范围高"
+      ],
+      "clear_from_row": 2,
+      "table": {
+        "source": "computed.lab_rows",
+        "start_row": 2,
+        "by_header": {
+          "检查日期": {"source": "row.check_date"},
+          "检查名称": {"source": "row.check_name"},
+          "评估": {"source": "row.assessment"},
+          "检查结果数值": {"source": "row.result_value"},
+          "检查结果单位": {"source": "row.result_unit"},
+          "正常范围低": {"source": "row.normal_low"},
+          "正常范围高": {"source": "row.normal_high"}
+        }
+      }
+    },
+    {
       "name": "不良反应-怀疑用药-合并用药",
       "clear_from_row": 2,
       "table": {
