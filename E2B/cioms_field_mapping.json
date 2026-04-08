@@ -67,7 +67,15 @@
     },
     {
       "name": "相关重要信息",
-      "clear_from_row": 2
+      "clear_from_row": 2,
+      "rows": [
+        {
+          "row": 2,
+          "by_column": {
+            "1": {"source": "cioms.important_info"}
+          }
+        }
+      ]
     },
     {
       "name": "实验室检查",
