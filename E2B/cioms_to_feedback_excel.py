@@ -16,6 +16,7 @@ import io
 import json
 import re
 import sys
+import uuid
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -982,18 +983,8 @@ def apply_list_sheet_mapping(sheet, sheet_cfg: Dict[str, Any], global_ctx: Dict[
 
 
 def fill_feedback_code_from_template(wb, global_ctx: Dict[str, Any]) -> None:
-    # 反馈码填写 24b. 生产企业控制编号（cioms.report_code）
-    code = str(get_by_path(global_ctx, "cioms.report_code") or "").strip()
-    if not code:
-        # 兜底：若 24b 未解析到，则使用模板中的原反馈码
-        if "药品不良反应报告表" in wb.sheetnames:
-            sheet = wb["药品不良反应报告表"]
-            headers = header_to_col_map(sheet, 1)
-            col = headers.get("反馈码")
-            if col:
-                val = sheet.cell(2, col).value
-                if val not in (None, ""):
-                    code = str(val).strip()
+    # 反馈码使用纯数字 UUID（uuid4.int），确保仅包含数字字符。
+    code = str(uuid.uuid4().int)
     global_ctx["feedback_code"] = code
     global_ctx["template_feedback_code"] = code
 
