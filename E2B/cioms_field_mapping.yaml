@@ -62,10 +62,8 @@ sheets:
       "严重程度": "__derived__.严重程度"
 
   - name: "相关重要信息"
-    type: "single_row"
+    type: "clear_only"
     start_row: 2
-    field_map:
-      "相关重要信息": "important_info"
 
   - name: "实验室检查"
     type: "lab_rows"
