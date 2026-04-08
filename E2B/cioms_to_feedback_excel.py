@@ -118,6 +118,7 @@ class ProcessResult:
     output_path: Path
     report_code: str
     suspected_drug_names: str
+    excel_file_name: str
     processed_at: str
 
 
@@ -1080,7 +1081,7 @@ def ensure_sheet_and_headers(wb, sheet_cfg: Dict[str, Any]):
     return sheet
 
 
-def generate_cover_pdf(output_path: Path, rows: List[Tuple[str, str, str]]) -> None:
+def generate_cover_pdf(output_path: Path, rows: List[Tuple[str, str, str, str]]) -> None:
     try:
         from reportlab.lib import colors
         from reportlab.lib.enums import TA_LEFT
@@ -1104,13 +1105,13 @@ def generate_cover_pdf(output_path: Path, rows: List[Tuple[str, str, str]]) -> N
         alignment=TA_LEFT,
     )
 
-    data: List[List[Any]] = [["报告编号", "怀疑用药", "本次处理的日期时间"]]
-    for report_code, suspected_drugs, processed_at in rows:
+    data: List[List[Any]] = [["报告编号", "怀疑用药", "Excel文件名", "本次处理的日期时间"]]
+    for report_code, suspected_drugs, excel_file_name, processed_at in rows:
         drug_para = Paragraph((suspected_drugs or "").replace("\n", "<br/>"), drug_style)
-        data.append([report_code or "", drug_para, processed_at or ""])
+        data.append([report_code or "", drug_para, excel_file_name or "", processed_at or ""])
 
     doc = SimpleDocTemplate(str(output_path), pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
-    table = Table(data, colWidths=[150, 220, 150], repeatRows=1)
+    table = Table(data, colWidths=[130, 190, 120, 130], repeatRows=1)
     table.setStyle(
         TableStyle(
             [
@@ -1120,7 +1121,7 @@ def generate_cover_pdf(output_path: Path, rows: List[Tuple[str, str, str]]) -> N
                 ("ALIGN", (0, 0), (-1, 0), "CENTER"),
                 ("ALIGN", (0, 1), (0, -1), "CENTER"),
                 ("ALIGN", (1, 1), (1, -1), "LEFT"),
-                ("ALIGN", (2, 1), (2, -1), "CENTER"),
+                ("ALIGN", (2, 1), (3, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
                 ("LEFTPADDING", (1, 1), (1, -1), 6),
@@ -1186,6 +1187,7 @@ def process_single_pdf(
         output_path=output_path,
         report_code=cioms.report_code,
         suspected_drug_names=suspected_drug_names,
+        excel_file_name=output_path.name,
         processed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     )
 
@@ -1231,7 +1233,8 @@ def main() -> None:
 
     # 批处理模式：当前目录全部 PDF
     cwd = Path.cwd()
-    pdf_files = sorted(cwd.glob("*.pdf"))
+    cover_pdf = cwd / "cover.pdf"
+    pdf_files = sorted(p for p in cwd.glob("*.pdf") if p.resolve() != cover_pdf.resolve())
     if not pdf_files:
         raise RuntimeError(f"当前目录未找到 PDF 文件：{cwd}")
 
@@ -1241,14 +1244,15 @@ def main() -> None:
     print(f"- 映射配置：{mapping_path}")
     print(f"- 待处理 PDF 数量：{len(pdf_files)}")
 
-    cover_rows: List[Tuple[str, str, str]] = []
+    cover_rows: List[Tuple[str, str, str, str]] = []
     for pdf in pdf_files:
         out = pdf.with_suffix(".xlsx")
         result = process_single_pdf(str(pdf), args.template_url, mapping_cfg, out)
-        cover_rows.append((result.report_code, result.suspected_drug_names, result.processed_at))
+        cover_rows.append((result.report_code, result.suspected_drug_names, result.excel_file_name, result.processed_at))
         print(f"  · {pdf.name} -> {result.output_path.name} （{result.page_count} 页，电子档校验通过）")
 
-    cover_pdf = cwd / "cover.pdf"
+    if cover_pdf.exists():
+        cover_pdf.unlink()
     generate_cover_pdf(cover_pdf, cover_rows)
     print(f"- 汇总封面：{cover_pdf.name}")
 
