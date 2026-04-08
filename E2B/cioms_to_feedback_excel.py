@@ -137,6 +137,14 @@ def extract_between(text: str, start: str, end: str) -> str:
     return text[start_idx + len(start) : end_idx].strip()
 
 
+def extract_first_non_empty_between(text: str, candidates: List[Tuple[str, str]]) -> str:
+    for start, end in candidates:
+        block = extract_between(text, start, end)
+        if block.strip():
+            return block.strip()
+    return ""
+
+
 def detect_electronic_pdf(pdf_bytes: bytes) -> Tuple[bool, List[str]]:
     reader = PdfReader(io.BytesIO(pdf_bytes))
     page_texts: List[str] = []
@@ -302,8 +310,16 @@ def parse_cioms(text: str) -> CiomsData:
         if m:
             data.primary_disease = m.group(1).strip()
 
-    # 重要信息：实验室检查
-    data.important_info = extract_between(text, "13. 相关实验室检查", "14-19. 怀疑药物（续）")
+    # 重要信息：实验室检查（兼容“13. 实验室检查”与“13. 相关实验室检查”两种标题）
+    data.important_info = extract_first_non_empty_between(
+        text,
+        [
+            ("13. 实验室检查", "13. 相关实验室检查"),
+            ("13. 实验室检查", "14-19. 怀疑药物（续）"),
+            ("13. 相关实验室检查", "14-19. 怀疑药物（续）"),
+            ("13. 相关实验室检查", "14. 怀疑药物"),
+        ],
+    )
 
     # 怀疑用药（主页区块，仅 #1/#2 这组结构化字段最稳定）
     main_suspect_block = extract_between(text, "14. 怀疑药物（包括通用名称）", "20. 停药后反应减轻了吗？")
