@@ -115,46 +115,32 @@ class CiomsData:
 
 
 def download_binary(source: str) -> bytes:
-    # Windows 绝对路径（如 D:\a\b.pdf）会被 urlsplit 识别成 scheme='d'，
-    # 需要优先按本地文件处理，避免误走 requests。
-    if re.match(r"^[a-zA-Z]:[\\/]", source):
-        local_path = Path(source).expanduser()
-        if not local_path.exists():
-            raise FileNotFoundError(f"本地文件不存在：{local_path}")
-        return local_path.read_bytes()
-
-    # UNC 路径（\\server\share\file.pdf）也按本地文件处理
-    if source.startswith("\\\\"):
-        local_path = Path(source).expanduser()
-        if not local_path.exists():
-            raise FileNotFoundError(f"本地文件不存在：{local_path}")
-        return local_path.read_bytes()
-
     parts = urllib.parse.urlsplit(source)
+    scheme = (parts.scheme or "").lower()
 
-    # 支持本地路径（例如 ./CIOMS文件.pdf）
-    if parts.scheme in ("", "file"):
-        if parts.scheme == "file":
-            local_path = Path(urllib.request.url2pathname(parts.path))
-        else:
-            local_path = Path(source).expanduser()
+    # 仅 http/https 走网络下载；其余一律按本地路径处理。
+    # 这样可避免 Windows 绝对路径 D:\... 被误判为 URL (scheme='d')。
+    if scheme in ("http", "https"):
+        if requests is not None:
+            response = requests.get(source, timeout=30)
+            response.raise_for_status()
+            return response.content
 
-        if not local_path.is_absolute():
-            local_path = (Path.cwd() / local_path).resolve()
-        if not local_path.exists():
-            raise FileNotFoundError(f"本地文件不存在：{local_path}")
-        return local_path.read_bytes()
+        safe_path = urllib.parse.quote(parts.path, safe="/")
+        encoded_url = urllib.parse.urlunsplit((parts.scheme, parts.netloc, safe_path, parts.query, parts.fragment))
+        with urllib.request.urlopen(encoded_url, timeout=30) as resp:
+            return resp.read()
 
-    # URL 下载路径
-    if requests is not None:
-        response = requests.get(source, timeout=30)
-        response.raise_for_status()
-        return response.content
+    if scheme == "file":
+        local_path = Path(urllib.request.url2pathname(parts.path))
+    else:
+        local_path = Path(source).expanduser()
 
-    safe_path = urllib.parse.quote(parts.path, safe="/")
-    encoded_url = urllib.parse.urlunsplit((parts.scheme, parts.netloc, safe_path, parts.query, parts.fragment))
-    with urllib.request.urlopen(encoded_url, timeout=30) as resp:
-        return resp.read()
+    if not local_path.is_absolute():
+        local_path = (Path.cwd() / local_path).resolve()
+    if not local_path.exists():
+        raise FileNotFoundError(f"本地文件不存在：{local_path}")
+    return local_path.read_bytes()
 
 
 def normalize_spaces(text: str) -> str:
