@@ -1083,31 +1083,48 @@ def ensure_sheet_and_headers(wb, sheet_cfg: Dict[str, Any]):
 def generate_cover_pdf(output_path: Path, rows: List[Tuple[str, str, str]]) -> None:
     try:
         from reportlab.lib import colors
+        from reportlab.lib.enums import TA_LEFT
         from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
     except ImportError as exc:
         raise RuntimeError("生成 cover PDF 需要安装 reportlab：pip install reportlab") from exc
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
 
-    data: List[List[str]] = [["报告编号", "怀疑用药", "本次处理的日期时间"]]
+    drug_style = ParagraphStyle(
+        "drug_cell",
+        fontName="STSong-Light",
+        fontSize=10,
+        leading=13,
+        wordWrap="CJK",
+        alignment=TA_LEFT,
+    )
+
+    data: List[List[Any]] = [["报告编号", "怀疑用药", "本次处理的日期时间"]]
     for report_code, suspected_drugs, processed_at in rows:
-        data.append([report_code or "", suspected_drugs or "", processed_at or ""])
+        drug_para = Paragraph((suspected_drugs or "").replace("\n", "<br/>"), drug_style)
+        data.append([report_code or "", drug_para, processed_at or ""])
 
     doc = SimpleDocTemplate(str(output_path), pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
-    table = Table(data, colWidths=[170, 180, 170], repeatRows=1)
+    table = Table(data, colWidths=[150, 220, 150], repeatRows=1)
     table.setStyle(
         TableStyle(
             [
                 ("FONTNAME", (0, 0), (-1, -1), "STSong-Light"),
                 ("FONTSIZE", (0, 0), (-1, -1), 10),
                 ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                ("ALIGN", (0, 1), (0, -1), "CENTER"),
+                ("ALIGN", (1, 1), (1, -1), "LEFT"),
+                ("ALIGN", (2, 1), (2, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                ("LEFTPADDING", (1, 1), (1, -1), 6),
+                ("RIGHTPADDING", (1, 1), (1, -1), 6),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.whitesmoke]),
             ]
         )
@@ -1162,7 +1179,7 @@ def process_single_pdf(
         name = (d.generic_name or d.trade_name or "").strip()
         if name and name not in suspected_name_list:
             suspected_name_list.append(name)
-    suspected_drug_names = "；".join(suspected_name_list)
+    suspected_drug_names = "\n".join(suspected_name_list)
 
     return ProcessResult(
         page_count=len(page_texts),
