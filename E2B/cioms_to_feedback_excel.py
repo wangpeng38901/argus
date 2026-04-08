@@ -115,6 +115,21 @@ class CiomsData:
 
 
 def download_binary(source: str) -> bytes:
+    # Windows 绝对路径（如 D:\a\b.pdf）会被 urlsplit 识别成 scheme='d'，
+    # 需要优先按本地文件处理，避免误走 requests。
+    if re.match(r"^[a-zA-Z]:[\\/]", source):
+        local_path = Path(source).expanduser()
+        if not local_path.exists():
+            raise FileNotFoundError(f"本地文件不存在：{local_path}")
+        return local_path.read_bytes()
+
+    # UNC 路径（\\server\share\file.pdf）也按本地文件处理
+    if source.startswith("\\\\"):
+        local_path = Path(source).expanduser()
+        if not local_path.exists():
+            raise FileNotFoundError(f"本地文件不存在：{local_path}")
+        return local_path.read_bytes()
+
     parts = urllib.parse.urlsplit(source)
 
     # 支持本地路径（例如 ./CIOMS文件.pdf）
