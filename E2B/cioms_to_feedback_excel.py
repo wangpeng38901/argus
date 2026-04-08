@@ -1123,7 +1123,6 @@ def generate_cover_pdf(output_path: Path, rows: List[Tuple[str, str, str, str]])
                 ("ALIGN", (1, 1), (1, -1), "LEFT"),
                 ("ALIGN", (2, 1), (3, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
                 ("LEFTPADDING", (1, 1), (1, -1), 6),
                 ("RIGHTPADDING", (1, 1), (1, -1), 6),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.whitesmoke]),
