@@ -141,6 +141,86 @@ def day_span_inclusive(start_iso: str, end_iso: str) -> str:
         return ""
 
 
+def parse_frequency_count_and_cycle_days(freq_raw: str) -> Tuple[str, str]:
+    """
+    返回 (用药-次数, 周期日数)。
+    例：
+    - 每3周1次 -> ("1", "21")
+    - q3w -> ("1", "21")
+    - qd -> ("1", "1")
+    - bid -> ("2", "1")
+    """
+    txt = (freq_raw or "").strip().lower().replace(" ", "")
+    if not txt:
+        return "", ""
+
+    # 每N周M次 / 每N天M次
+    m = re.search(r"每(\d+)周(\d+)次", txt)
+    if m:
+        weeks = int(m.group(1))
+        count = m.group(2)
+        return count, str(weeks * 7)
+    m = re.search(r"每(\d+)天(\d+)次", txt)
+    if m:
+        days = int(m.group(1))
+        count = m.group(2)
+        return count, str(days)
+
+    # q3w / q2d / q8h
+    m = re.search(r"q(\d+)([wdh])", txt)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2)
+        if unit == "w":
+            return "1", str(n * 7)
+        if unit == "d":
+            return "1", str(n)
+        if unit == "h":
+            # 每 n 小时一次，折算日频次
+            times_per_day = max(1, round(24 / n))
+            return str(times_per_day), "1"
+
+    # qd / bid / tid / qid / once
+    if "qid" in txt:
+        return "4", "1"
+    if "tid" in txt:
+        return "3", "1"
+    if "bid" in txt:
+        return "2", "1"
+    if "qd" in txt or "once" in txt:
+        return "1", "1"
+
+    # 兜底：抓“X次”
+    m = re.search(r"(\d+)\s*次", txt)
+    if m:
+        return m.group(1), ""
+
+    return "", ""
+
+
+def parse_cycle_days_from_frequency_text(freq_raw: str) -> str:
+    txt = (freq_raw or "").strip().lower().replace(" ", "")
+    if not txt:
+        return ""
+    m = re.search(r"每(\d+)周(\d+)次", txt)
+    if m:
+        return str(int(m.group(1)) * 7)
+    m = re.search(r"每(\d+)天(\d+)次", txt)
+    if m:
+        return str(int(m.group(1)))
+    m = re.search(r"q(\d+)([wdh])", txt)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2)
+        if unit == "w":
+            return str(n * 7)
+        if unit == "d":
+            return str(n)
+        if unit == "h":
+            return "1"
+    return ""
+
+
 def extract_between(text: str, start: str, end: str) -> str:
     start_idx = text.find(start)
     if start_idx < 0:
@@ -367,9 +447,12 @@ def parse_cioms(text: str) -> CiomsData:
         item = drugs.get(idx, DrugUsage(seq=idx))
         item.dose = m.group(2)
         item.dose_unit = m.group(3).replace("μg", "ug")
-        freq_raw = m.group(4).strip()
-        freq_count = re.search(r"(\d+)\s*次", freq_raw)
-        item.frequency = freq_count.group(1) if freq_count else freq_raw
+        freq_raw = m.group(4).strip().rstrip("；;。")
+        count_val, cycle_days = parse_frequency_count_and_cycle_days(freq_raw)
+        item.frequency = count_val if count_val else freq_raw
+        # 周期型频率（如每3周1次）优先映射为给药日数（21）
+        if cycle_days:
+            item.days = cycle_days
         drugs[idx] = item
 
     # 给药途径
@@ -416,7 +499,9 @@ def parse_cioms(text: str) -> CiomsData:
     for m in re.finditer(r"#(\d+)\)\s*([\d.]+)\s*day", duration_block):
         idx = int(m.group(1))
         item = drugs.get(idx, DrugUsage(seq=idx))
-        item.days = m.group(2)
+        # 仅在未有周期天数时，才使用 day 字段兜底
+        if not item.days:
+            item.days = m.group(2)
         drugs[idx] = item
 
     # 续页 14-19（有些文档怀疑药只有续页里完整给药间期）
@@ -459,9 +544,11 @@ def parse_cioms(text: str) -> CiomsData:
                     if not item.dose_unit:
                         item.dose_unit = d.group(2).replace("μg", "ug")
                     if not item.frequency:
-                        freq_raw = d.group(3).strip()
-                        freq_count = re.search(r"(\d+)\s*次", freq_raw)
-                        item.frequency = freq_count.group(1) if freq_count else freq_raw
+                        freq_raw = d.group(3).strip().rstrip("；;。")
+                        count_val, cycle_days = parse_frequency_count_and_cycle_days(freq_raw)
+                        item.frequency = count_val if count_val else freq_raw
+                        if cycle_days:
+                            item.days = cycle_days
                 elif re.match(r"\d{4}年\d{2}月\d{2}日\s*/\s*(\d{4}年\d{2}月\d{2}日|继续|不明);?$", line):
                     dm = re.match(r"(\d{4}年\d{2}月\d{2}日)\s*/\s*(\d{4}年\d{2}月\d{2}日|继续|不明);?$", line)
                     if dm:
